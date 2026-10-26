@@ -1,0 +1,4026 @@
+-- ====================================================================
+--  SKILL ISSUE FINAL BOSS   |   By Duke
+--  Hub 3-in-1: Gym Bot + Nono Anti-Lag + WRAITH Parry/Lock
+--
+--  Tiga script asli ditanam UTUH di bagian paling bawah file ini
+--  (tidak ada satu karakter pun yang diedit) dan dijalankan apa adanya.
+--  Hub ini cuma:
+--    * menyembunyikan UI lama masing-masing script (tidak dihapus)
+--    * mengendalikan lewat tombol/toggle bawaan mereka (firesignal /
+--      getconnections), dan lewat tabel CFG mereka (getgc) untuk opsi
+--      yang memang cuma ada di CFG
+--  Tombol hub: INSERT = buka/tutup. Bind bawaan script asli
+--  (RightShift, RightControl) tetap seperti aslinya.
+-- ====================================================================
+
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local UIS          = game:GetService("UserInputService")
+local StarterGui   = game:GetService("StarterGui")
+local Stats        = game:GetService("Stats")
+
+local LP   = Players.LocalPlayer
+local PGui = LP:WaitForChild("PlayerGui")
+local env  = (getgenv and getgenv()) or _G
+
+if env.__SIFB_STOP then pcall(env.__SIFB_STOP) end
+
+local SRC = {}            -- diisi di bagian bawah file (kode asli, utuh)
+
+local alive  = true
+local conns  = {}
+local sg
+local function track(c) conns[#conns + 1] = c; return c end
+
+-- ---------- tema ----------
+local WHITE  = Color3.fromRGB(255, 255, 255)
+local ACCENT = Color3.fromRGB(255, 84, 104)
+local GREEN  = Color3.fromRGB(31, 157, 85)
+local BLUE   = Color3.fromRGB(37, 99, 201)
+local OFFC   = Color3.fromRGB(58, 63, 77)
+local TXT    = Color3.fromRGB(223, 227, 236)
+local DIM    = Color3.fromRGB(144, 151, 168)
+local OKC    = Color3.fromRGB(74, 222, 128)
+local PANELC = Color3.fromRGB(12, 14, 22)
+local FB, FR = Enum.Font.GothamBold, Enum.Font.Gotham
+local LEFT, RIGHT = Enum.TextXAlignment.Left, Enum.TextXAlignment.Right
+
+-- ---------- util ----------
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
+local function text(parent, str, size, color, props)
+    local t = {
+        Text = str, Font = FR, TextSize = size, TextColor3 = color,
+        BackgroundTransparency = 1, TextXAlignment = LEFT,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }
+    for k, v in pairs(props or {}) do t[k] = v end
+    return new("TextLabel", t, parent)
+end
+local orderN = 0
+local function ord() orderN = orderN + 1; return orderN end
+local function isPointer(i)
+    local t = i.UserInputType
+    return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+end
+local function notify(msg)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", { Title = "Skill Issue Final Boss", Text = msg, Duration = 4 })
+    end)
+    print("[SIFB] " .. msg)
+end
+
+-- "klik" tombol script asli tanpa input asli
+local function fire(inst, sigName)
+    local ok0, sig = pcall(function() return inst[sigName] end)
+    if not ok0 then return false end
+    if getconnections then
+        local ok = pcall(function()
+            for _, c in ipairs(getconnections(sig)) do c:Fire() end
+        end)
+        if ok then return true end
+    end
+    if firesignal then
+        if pcall(firesignal, sig) then return true end
+    end
+    return false
+end
+
+-- ---------- FPS / ping ----------
+local fpsNow, fAcc, fFrames = 60, 0, 0
+track(RunService.RenderStepped:Connect(function(dt)
+    fAcc = fAcc + dt
+    fFrames = fFrames + 1
+    if fAcc >= 0.5 then
+        fpsNow = math.floor(fFrames / fAcc + 0.5)
+        fAcc, fFrames = 0, 0
+    end
+end))
+local function pingNow()
+    local ok, v = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+    if ok and v then return math.floor(v) end
+    return nil
+end
+local function colorFPS(f)
+    if f >= 55 then return OKC end
+    if f >= 40 then return Color3.fromRGB(220, 200, 60) end
+    if f >= 25 then return Color3.fromRGB(220, 130, 60) end
+    return Color3.fromRGB(220, 70, 60)
+end
+
+-- ====================================================================
+--  LINK KE SCRIPT ASLI
+-- ====================================================================
+local GY, LG, PR = {}, { presets = {}, rows = {} }, {}   -- gym / anti-lag / parry
+local cfgGym, cfgParry = {}, {}
+
+local function uiRoots()
+    local r = {}
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and h then r[#r + 1] = h end
+    end
+    local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok2 and cg then r[#r + 1] = cg end
+    r[#r + 1] = PGui
+    return r
+end
+
+local function findByText(guiNames, pattern, class)
+    for _, root in ipairs(uiRoots()) do
+        local ok, kids = pcall(function() return root:GetChildren() end)
+        if ok then
+            for _, g in ipairs(kids) do
+                if guiNames[g.Name] and g ~= sg then
+                    local ok2, ds = pcall(function() return g:GetDescendants() end)
+                    if ok2 then
+                        for _, d in ipairs(ds) do
+                            if d:IsA(class) then
+                                local okT, t = pcall(function() return d.Text end)
+                                if okT and type(t) == "string" and t:find(pattern) then
+                                    return d, g
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function linkGym()
+    if GY.btn and GY.btn.Parent then return end
+    local b, g = findByText({ GymBotUI = true, TouchGui = true }, "^GYM BOT:", "TextButton")
+    if b then
+        GY.btn, GY.sg = b, g
+        pcall(function() g.Enabled = false end)
+    end
+end
+
+local LAG_NAMES = { "Nuke Texture", "Kill Shadow", "Kill Post FX", "Hide Leaves", "Kill FX",
+    "Anchor Parts", "Kill Skybox", "Aggressive", "Adaptive FPS", "Auto Apply" }
+
+local function linkLag()
+    if LG.apply and LG.apply.Parent then return end
+    local g = PGui:FindFirstChild("NonoAntiLag")
+    if not g then return end
+    LG.presets, LG.rows = {}, {}
+    for _, d in ipairs(g:GetDescendants()) do
+        if d:IsA("TextButton") then
+            local t = d.Text
+            if t:find("APPLY NUKE", 1, true) or t:find("RE-APPLY", 1, true) then
+                LG.apply = d
+            elseif t:find("RESTORE", 1, true) then
+                LG.restore = d
+            elseif t == "SAFE" or t == "BALANCED" or t == "MAX" then
+                LG.presets[t] = d
+            end
+        elseif d:IsA("TextLabel") then
+            for _, name in ipairs(LAG_NAMES) do
+                if d.Text == name then
+                    local row = d.Parent
+                    local pill = row:FindFirstChildOfClass("Frame")
+                    local b = row:FindFirstChildOfClass("TextButton")
+                    if pill and b then LG.rows[name] = { btn = b, pill = pill } end
+                end
+            end
+            if d.Text == "Render Distance" then
+                for _, s in ipairs(d.Parent:GetChildren()) do
+                    if s:IsA("TextLabel") and s ~= d then LG.dist = s end
+                end
+            end
+        end
+    end
+    local main = g:FindFirstChild("Main")
+    if main and LG.apply then
+        LG.main = main
+        main.Visible = false      -- bukan sg.Enabled, supaya RightControl asli gak munculin lagi
+    end
+end
+
+local function linkParry()
+    if PR.pc and PR.pc.Parent then return end
+    local g = PGui:FindFirstChild("WRAITH_UI")
+    if not g then return end
+    for _, d in ipairs(g:GetDescendants()) do
+        if d:IsA("TextButton") then
+            local t = d.Text
+            if t == "◈" then PR.pill = d
+            elseif t:find("^PARRY") then PR.pc = d
+            elseif t:find("^LOCK") then PR.lc = d end
+        end
+    end
+    if not PR.pc then return end
+    local panel = PR.pc.Parent
+    for _, d in ipairs(panel:GetChildren()) do
+        if d:IsA("TextLabel") then
+            if d.Position.Y.Offset == 76 then PR.info = d
+            elseif d.Position.Y.Offset == 90 then PR.sl = d end
+        end
+    end
+    PR.sg = g
+    -- panel asli cuma update teks pas Visible, jadi dibuka lewat klik pill-nya
+    -- sendiri, lalu seluruh ScreenGui-nya disembunyikan
+    if PR.pill and not panel.Visible then fire(PR.pill, "MouseButton1Click") end
+    task.delay(0.5, function() pcall(function() g.Enabled = false end) end)
+end
+
+-- config table lewat getgc (cuma baca/tulis nilai, kode asli gak disentuh)
+local function scanTables()
+    if type(getgc) ~= "function" then return false end
+    local ok, list = pcall(getgc, true)
+    if not ok or type(list) ~= "table" then return false end
+    for i, t in ipairs(list) do
+        if type(t) == "table" then
+            local okA, a = pcall(rawget, t, "PullLead")
+            if okA and a ~= nil then
+                local _, b = pcall(rawget, t, "StopOnMax")
+                local _, c = pcall(rawget, t, "AutoLevel")
+                if b ~= nil and c ~= nil then cfgGym[#cfgGym + 1] = t end
+            else
+                local okB, l = pcall(rawget, t, "LeadSet")
+                if okB and l ~= nil then
+                    local _, r = pcall(rawget, t, "RefreshMax")
+                    if r ~= nil then cfgParry[#cfgParry + 1] = t end
+                end
+            end
+        end
+        if i % 4000 == 0 then task.wait() end
+    end
+    return true
+end
+
+local function cget(list, k) local t = list[#list]; if t then return t[k] end end
+local function cset(list, k, v) for _, t in ipairs(list) do t[k] = v end end
+
+-- FAST (ring): pola patch yang sama kayak script gym, tapi bisa dibalikin
+local FAST_VALUES = { LeadIn = 0.25, GapMin = 0.15, GapMax = 0.30, CompleteHold = 1.0, MissCooldown = 0.3 }
+local fastOn, fastBackup = false, nil
+local function setFast(on)
+    if type(getgc) ~= "function" then return false end
+    local done = false
+    pcall(function()
+        for _, t in ipairs(getgc(true)) do
+            if type(t) == "table" and rawget(t, "GymFolderName") and rawget(t, "LeadIn") then
+                if on then
+                    fastBackup = fastBackup or {}
+                    for k, v in pairs(FAST_VALUES) do
+                        if fastBackup[k] == nil then fastBackup[k] = rawget(t, k) end
+                        t[k] = v
+                    end
+                elseif fastBackup then
+                    for k, v in pairs(fastBackup) do t[k] = v end
+                end
+                done = true
+                break
+            end
+        end
+    end)
+    return done
+end
+
+-- ====================================================================
+--  UI
+-- ====================================================================
+local refreshers = {}
+local function onRefresh(f) refreshers[#refreshers + 1] = f; pcall(f) end
+
+local drag, activeSlider
+local cam = workspace.CurrentCamera
+local vp  = (cam and cam.ViewportSize) or Vector2.new(844, 390)
+local W   = math.min(640, vp.X - 16)
+local H   = math.min(344, vp.Y - 16)
+local SIDE = 132
+
+sg = new("ScreenGui", { Name = "SkillIssueFinalBoss", ResetOnSpawn = false, IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000 })
+local okParent = pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+if not okParent or not sg.Parent then
+    sg.Name = "TouchGui"      -- game nge-skip ScreenGui bernama TouchGui pas nyembunyiin UI saat gym
+    sg.Parent = PGui
+end
+
+local panel = new("Frame", {
+    Name = "Panel", Size = UDim2.fromOffset(W, H),
+    Position = UDim2.fromOffset(math.floor((vp.X - W) / 2), math.floor((vp.Y - H) / 2)),
+    BackgroundColor3 = PANELC, BackgroundTransparency = 0.26, BorderSizePixel = 0, ClipsDescendants = true,
+}, sg)
+corner(panel, 16)
+new("UIStroke", { Color = WHITE, Transparency = 0.86, Thickness = 1 }, panel)
+
+local header = new("Frame", { Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = WHITE,
+    BackgroundTransparency = 0.95, BorderSizePixel = 0 }, panel)
+text(header, "Skill Issue Final Boss", 15, WHITE, { Font = FB, Size = UDim2.new(0, 210, 1, 0), Position = UDim2.fromOffset(14, 0) })
+text(header, "By Duke", 11, ACCENT, { Font = FB, Size = UDim2.new(0, 60, 1, 0), Position = UDim2.fromOffset(226, 2) })
+local minBtn = new("TextButton", { Text = "–", Font = FB, TextSize = 18, TextColor3 = WHITE,
+    BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0,
+    Size = UDim2.fromOffset(40, 34), Position = UDim2.new(1, -46, 0.5, -17) }, header)
+corner(minBtn, 9)
+
+local body = new("Frame", { Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 1, -66),
+    BackgroundTransparency = 1, BorderSizePixel = 0 }, panel)
+local footer = new("Frame", { Position = UDim2.new(0, 0, 1, -24), Size = UDim2.new(1, 0, 0, 24),
+    BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.75, BorderSizePixel = 0 }, panel)
+text(footer, "Skill issue final boss", 11, DIM, { Size = UDim2.new(0, 150, 1, 0), Position = UDim2.fromOffset(14, 0) })
+local statLbl = text(footer, "", 11, DIM, { Size = UDim2.new(0, 150, 1, 0), Position = UDim2.new(0.5, -75, 0, 0),
+    TextXAlignment = Enum.TextXAlignment.Center })
+text(footer, "By Duke", 11, ACCENT, { Font = FB, Size = UDim2.new(0, 56, 1, 0), Position = UDim2.new(1, -66, 0, 0),
+    TextXAlignment = RIGHT })
+local unloadBtn = new("TextButton", { Text = "Unload", Font = FR, TextSize = 11, TextColor3 = DIM,
+    BackgroundTransparency = 1, Size = UDim2.fromOffset(50, 24), Position = UDim2.new(1, -122, 0, 0) }, footer)
+
+local side = new("Frame", { Size = UDim2.new(0, SIDE, 1, 0), BackgroundTransparency = 1 }, body)
+new("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, side)
+new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, side)
+new("Frame", { Size = UDim2.new(0, 1, 1, 0), Position = UDim2.fromOffset(SIDE, 0), BackgroundColor3 = WHITE,
+    BackgroundTransparency = 0.92, BorderSizePixel = 0 }, body)
+local content = new("Frame", { Position = UDim2.fromOffset(SIDE + 1, 0), Size = UDim2.new(1, -(SIDE + 1), 1, 0),
+    BackgroundTransparency = 1, ClipsDescendants = true }, body)
+
+local launcher = new("TextButton", { Name = "Launcher", Text = "SI", Font = FB, TextSize = 14, TextColor3 = WHITE,
+    BackgroundColor3 = PANELC, BackgroundTransparency = 0.2, BorderSizePixel = 0, AutoButtonColor = false,
+    Size = UDim2.fromOffset(46, 46), Position = UDim2.fromOffset(12, 64) }, sg)
+corner(launcher, 14)
+new("UIStroke", { Color = ACCENT, Thickness = 1.5 }, launcher)
+
+local isOpen = true
+local function setOpen(v)
+    isOpen = v
+    panel.Visible = v
+    launcher.BackgroundColor3 = v and ACCENT or PANELC
+    launcher.BackgroundTransparency = v and 0.15 or 0.2
+end
+minBtn.Activated:Connect(function() setOpen(false) end)
+
+-- ---------- komponen ----------
+local function newPage()
+    local sf = new("ScrollingFrame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = ACCENT, CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
+        ElasticBehavior = Enum.ElasticBehavior.Never, Visible = false }, content)
+    new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, sf)
+    new("UIPadding", { PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 14) }, sf)
+    return sf
+end
+local function card(parent, h)
+    local f = new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.94, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, h), LayoutOrder = ord() }, parent)
+    corner(f, 10)
+    return f
+end
+local function hrow(parent, h)
+    local f = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, h), LayoutOrder = ord() }, parent)
+    new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8),
+        SortOrder = Enum.SortOrder.LayoutOrder }, f)
+    return f
+end
+local function cell(n) return UDim2.new(1 / n, -(8 * (n - 1)) / n, 1, 0) end
+local function section(parent, str)
+    return text(parent, string.upper(str), 11, DIM, { Font = FB, Size = UDim2.new(1, 0, 0, 14), LayoutOrder = ord() })
+end
+local function button(parent, str, bg, size)
+    local b = new("TextButton", { Text = str, Font = FB, TextSize = 13, TextColor3 = WHITE, BackgroundColor3 = bg,
+        BorderSizePixel = 0, Size = size or UDim2.new(1, 0, 0, 40) }, parent)
+    corner(b, 10)
+    return b
+end
+local function grid(parent)
+    local g = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = ord() }, parent)
+    new("UIGridLayout", { CellSize = UDim2.new(0.5, -3, 0, 36), CellPadding = UDim2.fromOffset(6, 6),
+        SortOrder = Enum.SortOrder.LayoutOrder }, g)
+    return g
+end
+local function linkLine(page, isLinked)
+    local l = text(page, "", 11, DIM, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = ord() })
+    onRefresh(function()
+        local ok = isLinked()
+        l.Text = ok and "● terhubung ke script asli" or "● menunggu script asli..."
+        l.TextColor3 = ok and OKC or DIM
+    end)
+end
+
+local function toggle(parent, label, get, set, enabledFn)
+    local row = new("TextButton", { Text = "", AutoButtonColor = false, BackgroundColor3 = WHITE,
+        BackgroundTransparency = 0.94, BorderSizePixel = 0, LayoutOrder = ord() }, parent)
+    corner(row, 9)
+    text(row, label, 12, TXT, { Size = UDim2.new(1, -52, 1, 0), Position = UDim2.fromOffset(10, 0) })
+    local pill = new("Frame", { Size = UDim2.fromOffset(34, 18), Position = UDim2.new(1, -44, 0.5, -9),
+        BackgroundColor3 = OFFC, BorderSizePixel = 0 }, row)
+    corner(pill, 9)
+    local knob = new("Frame", { Size = UDim2.fromOffset(14, 14), Position = UDim2.fromOffset(2, 2),
+        BackgroundColor3 = WHITE, BorderSizePixel = 0 }, pill)
+    corner(knob, 7)
+    local function refresh()
+        local on = get() and true or false
+        pill.BackgroundColor3 = on and ACCENT or OFFC
+        knob.Position = on and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2)
+        row.BackgroundTransparency = (enabledFn and not enabledFn()) and 0.97 or 0.94
+    end
+    row.Activated:Connect(function()
+        if enabledFn and not enabledFn() then return end
+        set(not get())
+        task.delay(0.1, refresh)
+        refresh()
+    end)
+    onRefresh(refresh)
+end
+
+local function segmented(parent, opts, get, set)
+    local r = hrow(parent, 38)
+    local btns = {}
+    for i, o in ipairs(opts) do
+        local b = new("TextButton", { Text = tostring(o), Font = FB, TextSize = 12, TextColor3 = WHITE,
+            BackgroundColor3 = WHITE, BackgroundTransparency = 0.92, BorderSizePixel = 0, Size = cell(#opts),
+            LayoutOrder = i }, r)
+        corner(b, 9)
+        btns[i] = b
+    end
+    local function refresh()
+        local cur = get()
+        for i, b in ipairs(btns) do
+            local on = (cur == opts[i])
+            b.BackgroundColor3 = on and ACCENT or WHITE
+            b.BackgroundTransparency = on and 0.1 or 0.92
+        end
+    end
+    for i, b in ipairs(btns) do
+        b.Activated:Connect(function() set(opts[i]); refresh() end)
+    end
+    onRefresh(refresh)
+end
+
+local function slider(parent, page, label, minV, maxV, step, get, set)
+    local c = card(parent, 54)
+    text(c, label, 12, TXT, { Size = UDim2.new(0.6, 0, 0, 16), Position = UDim2.fromOffset(12, 8) })
+    local val = text(c, "", 12, WHITE, { Font = FB, Size = UDim2.new(0.4, -12, 0, 16), Position = UDim2.new(0.6, 0, 0, 8),
+        TextXAlignment = RIGHT })
+    local trk = new("Frame", { Size = UDim2.new(1, -24, 0, 6), Position = UDim2.fromOffset(12, 36),
+        BackgroundColor3 = OFFC, BorderSizePixel = 0 }, c)
+    corner(trk, 3)
+    local fill = new("Frame", { BackgroundColor3 = ACCENT, BorderSizePixel = 0, Size = UDim2.new(0, 0, 1, 0) }, trk)
+    corner(fill, 3)
+    local thumb = new("Frame", { Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0), BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 3 }, trk)
+    corner(thumb, 8)
+    local hit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30),
+        Position = UDim2.new(0, 0, 0.5, -15), ZIndex = 4 }, trk)
+    local function show(v)
+        local pct = (v - minV) / (maxV - minV)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        thumb.Position = UDim2.new(pct, 0, 0.5, 0)
+        val.Text = tostring(v)
+    end
+    local s = { page = page }
+    function s.move(x)
+        local w = math.max(trk.AbsoluteSize.X, 1)
+        local raw = minV + math.clamp((x - trk.AbsolutePosition.X) / w, 0, 1) * (maxV - minV)
+        local v = math.clamp(minV + math.floor((raw - minV) / step + 0.5) * step, minV, maxV)
+        show(v)
+        set(v)
+    end
+    hit.InputBegan:Connect(function(i)
+        if isPointer(i) then
+            activeSlider = s
+            page.ScrollingEnabled = false
+            s.move(i.Position.X)
+        end
+    end)
+    onRefresh(function()
+        local v = get()
+        if v then show(math.clamp(v, minV, maxV)) end
+    end)
+end
+
+-- ---------- tab ----------
+local pages, tabBtns = {}, {}
+local function showTab(id)
+    for k, p in pairs(pages) do p.Visible = (k == id) end
+    for k, t in pairs(tabBtns) do
+        t.btn.BackgroundTransparency = (k == id) and 0.8 or 1
+        t.btn.BackgroundColor3 = ACCENT
+        t.lbl.TextColor3 = (k == id) and WHITE or DIM
+    end
+end
+local function addTab(id, name, dotFn)
+    local b = new("TextButton", { Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 44), LayoutOrder = ord() }, side)
+    corner(b, 10)
+    local lbl = text(b, name, 13, DIM, { Font = FB, Size = UDim2.new(1, -30, 1, 0), Position = UDim2.fromOffset(10, 0) })
+    local dot = new("Frame", { Size = UDim2.fromOffset(8, 8), Position = UDim2.new(1, -16, 0.5, -4),
+        BackgroundColor3 = OFFC, BorderSizePixel = 0 }, b)
+    corner(dot, 4)
+    tabBtns[id] = { btn = b, lbl = lbl }
+    b.Activated:Connect(function() showTab(id) end)
+    onRefresh(function() dot.BackgroundColor3 = dotFn() and OKC or OFFC end)
+    pages[id] = newPage()
+    return pages[id]
+end
+
+local function gymOn() return GY.btn and GY.btn.Parent and not GY.btn.Text:find("OFF", 1, true) end
+local function lagApplied() return LG.apply and LG.apply.Parent and LG.apply.Text:find("RE-APPLY", 1, true) ~= nil end
+local function parryOn() return PR.pc and PR.pc.Parent and not PR.pc.Text:find("OFF", 1, true) end
+local function lockOn() return PR.lc and PR.lc.Parent and not PR.lc.Text:find("OFF", 1, true) end
+
+-- ==================== TAB: GYM BOT ====================
+local gymPage = addTab("gym", "Gym Bot", function() return gymOn() end)
+do
+    local c = card(gymPage, 56)
+    text(c, "Gym Bot", 15, WHITE, { Font = FB, Size = UDim2.new(1, -130, 0, 20), Position = UDim2.fromOffset(12, 8) })
+    text(c, "Angkat beban · Pull up · Treadmill", 11, DIM, { Size = UDim2.new(1, -130, 0, 16), Position = UDim2.fromOffset(12, 30) })
+    local b = button(c, "...", OFFC, UDim2.fromOffset(100, 38))
+    b.Position = UDim2.new(1, -110, 0.5, -19)
+    b.Activated:Connect(function()
+        if GY.btn then fire(GY.btn, "Activated") else notify("Gym Bot belum siap (GymMinigameGui belum ketemu)") end
+    end)
+    onRefresh(function()
+        if not GY.btn then b.Text = "..."; b.BackgroundColor3 = OFFC; return end
+        local on = gymOn()
+        b.Text = on and "ON" or "OFF"
+        b.BackgroundColor3 = on and GREEN or Color3.fromRGB(180, 49, 63)
+    end)
+    local cfgOk = function() return #cfgGym > 0 end
+    section(gymPage, "Level latihan")
+    segmented(gymPage, { 1, 2, 3, 4, 5 }, function() return cget(cfgGym, "Level") end, function(v) cset(cfgGym, "Level", v) end)
+    local g = grid(gymPage)
+    local function gt(label, key)
+        toggle(g, label, function() return cget(cfgGym, key) end, function(v) cset(cfgGym, key, v) end, cfgOk)
+    end
+    gt("Auto level", "AutoLevel")
+    gt("Auto hit", "AutoHit")
+    gt("Stop saat max", "StopOnMax")
+    gt("Keluar saat max", "ExitOnMax")
+    gt("Auto masuk lagi", "AutoReenter")
+    toggle(g, "Fast (ring)", function() return fastOn end, function(v)
+        if setFast(v) then fastOn = v else notify("Fast gagal (executor tanpa getgc / config game gak ketemu)") end
+    end, function() return type(getgc) == "function" end)
+    slider(gymPage, gymPage, "Tap rate treadmill (per detik)", 3, 12, 1,
+        function() return cget(cfgGym, "TapRate") or 7 end, function(v) cset(cfgGym, "TapRate", v) end)
+    linkLine(gymPage, function() return GY.btn ~= nil end)
+end
+
+-- ==================== TAB: ANTI-LAG ====================
+local lagPage = addTab("lag", "Anti-Lag", function() return lagApplied() end)
+local beforeFPS, lastPreset, capValue, capTouched = nil, nil, 60, false
+do
+    local r = hrow(lagPage, 64)
+    local function stat(title, w)
+        local c = new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.94, BorderSizePixel = 0,
+            Size = UDim2.new(w, -6, 1, 0) }, r)
+        corner(c, 10)
+        text(c, title, 11, DIM, { Font = FB, Size = UDim2.new(1, -16, 0, 14), Position = UDim2.fromOffset(10, 9) })
+        return text(c, "-- fps", 18, WHITE, { Font = FB, Size = UDim2.new(1, -16, 0, 26), Position = UDim2.fromOffset(10, 28) })
+    end
+    local bv = stat("BEFORE", 0.22)
+    local av = stat("AFTER", 0.22)
+    local ab = button(r, "Apply nuke", ACCENT, UDim2.new(0.31, -6, 1, 0))
+    local rb = button(r, "Restore", OFFC, UDim2.new(0.25, -6, 1, 0))
+    ab.Activated:Connect(function()
+        if not LG.apply then notify("Anti-Lag belum siap"); return end
+        if not lagApplied() and LG.apply.Text:find("APPLY NUKE", 1, true) then beforeFPS = fpsNow end
+        fire(LG.apply, "MouseButton1Click")
+        if capTouched then
+            task.delay(0.6, function() if setfpscap then pcall(setfpscap, capValue) end end)
+        end
+    end)
+    rb.Activated:Connect(function()
+        if not LG.restore then return end
+        fire(LG.restore, "MouseButton1Click")
+        beforeFPS = nil
+        capValue, capTouched = 60, false
+    end)
+    onRefresh(function()
+        local t = (LG.apply and LG.apply.Parent) and LG.apply.Text or ""
+        local applied = t:find("RE-APPLY", 1, true) ~= nil
+        local running = (t == "...")
+        ab.Text = running and "Menjalankan..." or (applied and "Re-apply" or "Apply nuke")
+        local bf = beforeFPS or fpsNow
+        bv.Text = bf .. " fps"
+        bv.TextColor3 = colorFPS(bf)
+        av.Text = applied and (fpsNow .. " fps") or "-- fps"
+        av.TextColor3 = applied and colorFPS(fpsNow) or DIM
+    end)
+
+    section(lagPage, "Preset")
+    segmented(lagPage, { "SAFE", "BALANCED", "MAX" }, function() return lastPreset end, function(v)
+        lastPreset = v
+        if LG.presets[v] then fire(LG.presets[v], "MouseButton1Click") end
+    end)
+    slider(lagPage, lagPage, "FPS cap (bypass)", 60, 300, 5, function() return capValue end, function(v)
+        capValue, capTouched = v, true
+        if setfpscap then pcall(setfpscap, v) end
+    end)
+    local dc = card(lagPage, 36)
+    text(dc, "Render distance (ikut preset)", 12, TXT, { Size = UDim2.new(0.7, 0, 1, 0), Position = UDim2.fromOffset(12, 0) })
+    local dval = text(dc, "--", 12, WHITE, { Font = FB, Size = UDim2.new(0.3, -12, 1, 0), Position = UDim2.new(0.7, 0, 0, 0),
+        TextXAlignment = RIGHT })
+    onRefresh(function() dval.Text = (LG.dist and LG.dist.Parent) and LG.dist.Text or "--" end)
+
+    local g = grid(lagPage)
+    for _, name in ipairs(LAG_NAMES) do
+        toggle(g, name, function()
+            local row = LG.rows[name]
+            return row and row.pill.Parent and row.pill.BackgroundColor3.G > 0.5
+        end, function()
+            local row = LG.rows[name]
+            if row then fire(row.btn, "MouseButton1Click") end
+        end, function() return LG.rows[name] ~= nil end)
+    end
+    linkLine(lagPage, function() return LG.apply ~= nil end)
+end
+
+-- ==================== TAB: PARRY & LOCK ====================
+local parryPage = addTab("parry", "Parry & Lock", function() return parryOn() or lockOn() end)
+do
+    local r = hrow(parryPage, 52)
+    local pb = button(r, "PARRY", OFFC, cell(2))
+    local lb = button(r, "LOCK", OFFC, cell(2))
+    pb.Activated:Connect(function()
+        if PR.pc then fire(PR.pc, "MouseButton1Click") else notify("WRAITH belum siap (CombatRemotes belum ketemu)") end
+    end)
+    lb.Activated:Connect(function()
+        if PR.lc then fire(PR.lc, "MouseButton1Click") end
+    end)
+    onRefresh(function()
+        if not PR.pc then pb.Text = "PARRY ..."; lb.Text = "LOCK ..."; return end
+        pb.Text = parryOn() and "PARRY ON" or "PARRY OFF"
+        pb.BackgroundColor3 = parryOn() and GREEN or OFFC
+        local lt = PR.lc and PR.lc.Text or ""
+        if not lockOn() then lb.Text = "LOCK OFF"
+        elseif lt:find("COMBAT", 1, true) then lb.Text = "LOCK · COMBAT"
+        elseif lt:find("NEUTRAL", 1, true) then lb.Text = "LOCK · NEUTRAL"
+        else lb.Text = "LOCK ON" end
+        lb.BackgroundColor3 = lockOn() and BLUE or OFFC
+    end)
+
+    local sr = hrow(parryPage, 54)
+    local vals = {}
+    local names = { "Ping", "Parry", "Miss", "Learned", "Win" }
+    for i, n in ipairs(names) do
+        local c = new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.94, BorderSizePixel = 0,
+            Size = cell(5), LayoutOrder = i }, sr)
+        corner(c, 10)
+        text(c, string.upper(n), 11, DIM, { Font = FB, Size = UDim2.new(1, -10, 0, 14), Position = UDim2.fromOffset(8, 7) })
+        vals[i] = text(c, "--", 15, WHITE, { Font = FB, Size = UDim2.new(1, -10, 0, 22), Position = UDim2.fromOffset(8, 26) })
+    end
+    onRefresh(function()
+        local t = (PR.info and PR.info.Text) or ""
+        local p, a, m, l, w = t:match("p:(%-?%d+)ms P:(%d+) M:(%d+) L:(%d+) W:(%d+)%%")
+        vals[1].Text = p and (p .. "ms") or "--"
+        vals[2].Text = a or "--"
+        vals[3].Text = m or "--"
+        vals[4].Text = l or "--"
+        vals[5].Text = w and (w .. "%") or "--"
+    end)
+
+    local cfgOk = function() return #cfgParry > 0 end
+    local g = grid(parryPage)
+    local function pt(label, key)
+        toggle(g, label, function() return cget(cfgParry, key) end, function(v) cset(cfgParry, key, v) end, cfgOk)
+    end
+    pt("Parry saat mukul", "ParryWhileSwinging")
+    pt("Hemat guard", "EcoSkipLow")
+    pt("Guard log (console)", "GuardLog")
+    pt("Belajar dari pemain lain", "LearnFromOthers")
+    local sl = text(parryPage, "idle · neutral", 11, DIM, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = ord() })
+    onRefresh(function() sl.Text = (PR.sl and PR.sl.Text ~= "") and PR.sl.Text or "idle · neutral" end)
+    linkLine(parryPage, function() return PR.pc ~= nil end)
+end
+
+-- ====================================================================
+--  DRAG + BUKA/TUTUP
+-- ====================================================================
+local function beginDrag(handle, target, onTap)
+    handle.InputBegan:Connect(function(i)
+        if isPointer(i) and not activeSlider then
+            drag = { target = target, start = i.Position, origin = target.Position, moved = false, onTap = onTap }
+        end
+    end)
+end
+beginDrag(header, panel, nil)
+beginDrag(launcher, launcher, function() setOpen(not isOpen) end)
+
+track(UIS.InputChanged:Connect(function(i)
+    local t = i.UserInputType
+    if t ~= Enum.UserInputType.MouseMovement and t ~= Enum.UserInputType.Touch then return end
+    if activeSlider then activeSlider.move(i.Position.X); return end
+    if not drag then return end
+    local d = i.Position - drag.start
+    if not drag.moved and (math.abs(d.X) > 6 or math.abs(d.Y) > 6) then drag.moved = true end
+    if drag.moved then
+        local c = workspace.CurrentCamera
+        local v = (c and c.ViewportSize) or Vector2.new(844, 390)
+        local sz = drag.target.AbsoluteSize
+        local x = math.clamp(drag.origin.X.Offset + d.X, 0, math.max(0, v.X - sz.X))
+        local y = math.clamp(drag.origin.Y.Offset + d.Y, 0, math.max(0, v.Y - sz.Y))
+        drag.target.Position = UDim2.fromOffset(x, y)
+    end
+end))
+track(UIS.InputEnded:Connect(function(i)
+    if not isPointer(i) then return end
+    if drag then
+        local dg = drag
+        drag = nil
+        if not dg.moved and dg.onTap then dg.onTap() end
+    end
+    if activeSlider then
+        activeSlider.page.ScrollingEnabled = true
+        activeSlider = nil
+    end
+end))
+track(UIS.InputBegan:Connect(function(i, gp)
+    if not gp and i.KeyCode == Enum.KeyCode.Insert then setOpen(not isOpen) end
+end))
+
+-- ====================================================================
+--  UNLOAD (balikin UI asli, script asli tetap jalan)
+-- ====================================================================
+local function unload()
+    if not alive then return end
+    alive = false
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    pcall(function() if GY.sg then GY.sg.Enabled = true end end)
+    pcall(function() if LG.main then LG.main.Visible = true end end)
+    pcall(function() if PR.sg then PR.sg.Enabled = true end end)
+    if sg then pcall(function() sg:Destroy() end) end
+    if env.__SIFB_STOP == unload then env.__SIFB_STOP = nil end
+end
+env.__SIFB_STOP = unload
+unloadBtn.Activated:Connect(unload)
+
+showTab("gym")
+setOpen(true)
+
+-- ====================================================================
+--  JALANKAN SCRIPT ASLI (masing-masing terisolasi, error satu gak ngerusak yang lain)
+-- ====================================================================
+local function runSource(name, src)
+    if type(loadstring) ~= "function" then notify("Executor gak punya loadstring"); return end
+    task.spawn(function()
+        local fn, err = loadstring(src, "=" .. name)
+        if not fn then
+            warn("[SIFB] " .. name .. " gagal dikompilasi: " .. tostring(err))
+            notify(name .. " gagal dimuat")
+            return
+        end
+        local ok, e = pcall(fn)
+        if not ok then warn("[SIFB] " .. name .. " error: " .. tostring(e)) end
+    end)
+end
+
+-- ====================================================================
+--  KODE ASLI (UTUH, TIDAK DIEDIT) — dimuat lewat loadstring di atas
+-- ====================================================================
+
+SRC.gym = [=====[
+-- ============================================================
+--  GYM AUTO v2 — High School Anime | Delta / Roblox (Luau)
+--
+--  Latihan yang di-handle:
+--   * Angkat beban : skill check ring (Space / TAP), baca jarum
+--   * Pull Up      : 2 note jatuh (F + J), ditekan pas nyampe tombol
+--   * Treadmill    : tap ritme di tombol RunButton
+--
+--  Yang di-auto (semua latihan):
+--   1. Pilih level otomatis (CFG.Level)
+--   2. Minigame dimainin otomatis
+--   3. Berhenti + keluar otomatis kalau stat "SUDAH MAKSIMAL"
+--   4. (opsional) masuk lagi ke mesin yang sama setelah sesi selesai
+--   5. (opsional) FAST: pangkas waktu tunggu ring (cuma angkat beban)
+--
+--  Cara kerja: script cuma nyetir minigame client yang sama kayak
+--  pemain, jadi gak ada remote yang dipalsuin.
+--   - Ring     : baca zona dari tick, ukur kecepatan jarum per frame,
+--                tekan 1 frame sebelum jarum masuk zona.
+--   - Pull Up  : tiap note jatuh dari atas ke tombolnya. Kecepatan note
+--                diukur dari posisinya per frame, lalu tombol F/J ditekan
+--                pas note nyampe (window game +-0.13 detik).
+--   - Treadmill: kecepatan lari = jumlah tap dalam 0.8 detik terakhir,
+--                jadi bot tap stabil ~TapRate kali/detik + sedikit acak.
+--
+--  Pakai: berdiri di mesin gym, trigger prompt-nya seperti biasa
+--  (atau nyalain AutoReenter), sisanya jalan sendiri.
+--  Tombol "GYM BOT" di layar buat ON/OFF. PC: RightShift.
+-- ============================================================
+
+local CFG = {
+    Level       = 5,      -- 1..5 (5 = paling berat / paling cepat)
+    AutoLevel   = true,   -- klik pilih level otomatis
+    AutoHit     = true,   -- main minigame otomatis
+    StopOnMax   = true,   -- stop bot kalau toast "SUDAH MAKSIMAL"
+    ExitOnMax   = true,   -- sekalian keluar dari mesin pas maksimal
+    AutoReenter = false,  -- masuk lagi ke mesin terakhir pas sesi selesai
+    PressAt     = 0.30,   -- ring: 0..1, posisi tekan di dalam zona (0.3 = agak awal)
+
+    PullLead    = 0.02,   -- pull up: tekan segini (detik) sebelum note nyampe
+    TapRate     = 7,      -- treadmill: tap per detik (level 5 butuh minimal ~5)
+    TapJitter   = 0.2,    -- treadmill: 0..1, acak jeda antar tap biar gak kaku
+
+    -- FAST (cuma ring/angkat beban): ngepangkas jeda client.
+    -- Server mungkin punya batas waktu minimum. Kalau gain gak masuk, matiin.
+    Fast        = false,
+    FastValues  = { LeadIn = 0.25, GapMin = 0.15, GapMax = 0.30, CompleteHold = 1.0, MissCooldown = 0.3 },
+}
+
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UIS            = game:GetService("UserInputService")
+local VIM            = game:GetService("VirtualInputManager")
+local StarterGui     = game:GetService("StarterGui")
+
+local LP   = Players.LocalPlayer
+local PGui = LP:WaitForChild("PlayerGui")
+
+-- ---------- re-execute aman ----------
+local env = (getgenv and getgenv()) or _G
+if env.__GYMBOT_STOP then pcall(env.__GYMBOT_STOP) end
+
+local alive   = true
+local conns   = {}
+local enabled = true
+local sg
+
+local function track(c) conns[#conns + 1] = c; return c end
+env.__GYMBOT_STOP = function()
+    alive = false
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    if sg then pcall(function() sg:Destroy() end) end
+end
+
+local function notify(text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", { Title = "Gym Bot", Text = text, Duration = 4 })
+    end)
+    print("[GymBot] " .. text)
+end
+
+-- ---------- helper: trigger signal tanpa input asli ----------
+local function fire(inst, sigName)
+    local sig = inst[sigName or "Activated"]
+    if firesignal then
+        local ok = pcall(firesignal, sig)
+        if ok then return true end
+    end
+    if getconnections then
+        local ok = pcall(function()
+            for _, c in ipairs(getconnections(sig)) do c:Fire() end
+        end)
+        if ok then return true end
+    end
+    return false
+end
+
+-- ---------- helper: "klik" tombol minigame (PullUp / TreadMill) ----------
+-- Handler tombol mereka dengerin InputBegan dan cuma baca .UserInputType,
+-- jadi input palsu berisi tabel kecil udah cukup. Kalau getconnections
+-- gak ada, jatuh ke keyboard virtual (F / J / Space).
+local FAKE_INPUT = { UserInputType = Enum.UserInputType.Touch, UserInputState = Enum.UserInputState.Begin }
+local usedMethod
+
+local function pressGui(btn, key)
+    if getconnections then
+        local fired = 0
+        pcall(function()
+            for _, c in ipairs(getconnections(btn.InputBegan)) do
+                local ok = pcall(function() c:Fire(FAKE_INPUT) end)
+                if ok then fired = fired + 1 end
+            end
+        end)
+        if fired > 0 then
+            if usedMethod ~= "connections" then
+                usedMethod = "connections"
+                print("[GymBot] tekan via getconnections")
+            end
+            return true
+        end
+    end
+    if key then
+        VIM:SendKeyEvent(true,  key, false, game)
+        VIM:SendKeyEvent(false, key, false, game)
+        if usedMethod ~= "vim" then
+            usedMethod = "vim"
+            print("[GymBot] tekan via VirtualInputManager (keyboard)")
+        end
+        return true
+    end
+    return false
+end
+
+-- ---------- tunggu GUI minigame ----------
+local gui = PGui:WaitForChild("GymMinigameGui", 30)
+if not gui then
+    warn("[GymBot] GymMinigameGui gak ketemu. Execute setelah game load penuh.")
+    return
+end
+local sc      = gui:WaitForChild("SkillCheck")
+local ls      = gui:WaitForChild("LevelSelect")
+local toast   = gui:WaitForChild("GainToast")
+local exitBtn = gui:WaitForChild("ExitHolder"):WaitForChild("Exit")
+
+-- rotator = frame 224x224, ZIndex 3 (ring jarum)
+local rotator
+for _, c in ipairs(sc:GetChildren()) do
+    if c:IsA("Frame") and c.Size.X.Offset == 224 and c.ZIndex == 3 then rotator = c; break end
+end
+if not rotator then warn("[GymBot] rotator ring gak ketemu"); return end
+
+-- ---------- FAST: patch config client (butuh getgc) ----------
+if CFG.Fast then
+    local patched = false
+    if getgc then
+        pcall(function()
+            for _, t in ipairs(getgc(true)) do
+                if type(t) == "table" and rawget(t, "GymFolderName") and rawget(t, "LeadIn") then
+                    for k, v in pairs(CFG.FastValues) do t[k] = v end
+                    patched = true
+                    break
+                end
+            end
+        end)
+    end
+    notify(patched and "FAST mode aktif" or "FAST gagal (executor gak support getgc)")
+end
+
+-- =====================================================================
+--  1) RING (angkat beban)
+-- =====================================================================
+local function press()
+    local btn = gui:FindFirstChild("PushButton")
+    if btn and fire(btn) then return end
+    VIM:SendKeyEvent(true,  Enum.KeyCode.Space, false, game)
+    VIM:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+end
+
+-- zona = tick yang ukurannya 3x18 (sisanya 2x10)
+local function readZone()
+    local lo, hi
+    for _, c in ipairs(sc:GetChildren()) do
+        if c:IsA("Frame") and c.Size.X.Offset == 3 and c.Size.Y.Offset == 18 then
+            local a = c.Rotation % 360
+            lo = lo and math.min(lo, a) or a
+            hi = hi and math.max(hi, a) or a
+        end
+    end
+    return lo, hi
+end
+
+local last, pressedThisCheck, zlo, zhi = 0, false, nil, nil
+
+track(RunService.RenderStepped:Connect(function()
+    if not alive then return end
+    if not enabled or not CFG.AutoHit then return end
+
+    if not sc.Visible or sc.GroupTransparency > 0.9 then
+        last, pressedThisCheck, zlo, zhi = 0, false, nil, nil
+        return
+    end
+
+    local rot = rotator.Rotation % 360
+    local d = rot - last            -- derajat per frame
+    last = rot
+
+    if d < -1 then                  -- rotation di-reset = ring baru mulai
+        pressedThisCheck, zlo, zhi = false, nil, nil
+        return
+    end
+    if d <= 0.01 or pressedThisCheck then return end   -- lead-in / udah ditekan
+
+    if not zlo then
+        zlo, zhi = readZone()
+        if not zlo then return end
+    end
+
+    -- game ngecek input di frame berikutnya, jadi prediksi rot + d
+    local width  = math.max(zhi - zlo, 4)
+    local target = zlo + width * CFG.PressAt
+    if rot + d >= target then
+        pressedThisCheck = true
+        press()
+    end
+end))
+
+-- =====================================================================
+--  2) PULL UP (note jatuh, lane F dan J)
+--  Layer "PullUpLayer": tombol "ButtonF"/"ButtonJ" + note bernama "Note"
+--  (clone tombol, Text = F atau J) yang jatuh dari Y=-0.12 ke Y tombol.
+--  Satu wave = 1 note per lane; keduanya harus kena (+-0.13 detik).
+-- =====================================================================
+local PULL_KEYS = { F = Enum.KeyCode.F, J = Enum.KeyCode.J }
+local noteInfo  = setmetatable({}, { __mode = "k" })   -- note -> {y, t, done}
+
+track(RunService.RenderStepped:Connect(function()
+    if not alive or not enabled or not CFG.AutoHit then return end
+    local layer = gui:FindFirstChild("PullUpLayer")
+    if not layer then return end
+
+    local now = os.clock()
+    for _, note in ipairs(layer:GetChildren()) do
+        if note.Name == "Note" and note:IsA("TextButton") then
+            local info = noteInfo[note]
+            if not info then
+                info = { y = note.Position.Y.Scale, t = now, done = false }
+                noteInfo[note] = info
+            elseif not info.done then
+                local y = note.Position.Y.Scale
+                if y ~= info.y then
+                    local dt = now - info.t
+                    local btn = layer:FindFirstChild("Button" .. note.Text)
+                    if btn and dt > 0 and y > info.y then
+                        local targetY = btn.Position.Y.Scale
+                        local speed   = (y - info.y) / dt            -- Y per detik
+                        local left    = (targetY - y) / speed        -- detik sampai nyampe
+                        local thr     = math.max(CFG.PullLead, dt * 0.5)
+                        if left <= thr then
+                            info.done = true
+                            pressGui(btn, PULL_KEYS[note.Text])
+                        end
+                    end
+                    info.y, info.t = y, now
+                end
+            end
+        end
+    end
+end))
+
+-- =====================================================================
+--  3) TREADMILL (tap ritme)
+--  Layer "TreadMillLayer" > Panel > "RunButton". Kecepatan = jumlah tap
+--  dalam 0.8 detik terakhir / (0.8 * TapsForMax), jadi tap stabil di atas
+--  ~5/detik udah cukup buat kecepatan penuh di semua level.
+-- =====================================================================
+local rng = Random.new()
+task.spawn(function()
+    while alive do
+        local layer = gui:FindFirstChild("TreadMillLayer")
+        local btn = layer and layer:FindFirstChild("RunButton", true)
+        if enabled and CFG.AutoHit and btn then
+            pressGui(btn, Enum.KeyCode.Space)
+            local base = 1 / math.max(CFG.TapRate, 1)
+            local j = CFG.TapJitter
+            task.wait(base * rng:NextNumber(1 - j * 0.5, 1 + j))
+        else
+            task.wait(0.2)
+        end
+    end
+end)
+
+-- ---------- auto pilih level ----------
+task.spawn(function()
+    while alive do
+        task.wait(0.25)
+        if enabled and CFG.AutoLevel and ls.Visible and ls.GroupTransparency < 0.6 then
+            local b = ls:FindFirstChild("Level" .. CFG.Level, true)
+            if b then fire(b) end
+        end
+    end
+end)
+
+-- ---------- stop kalau stat maksimal ----------
+track(toast:GetPropertyChangedSignal("Text"):Connect(function()
+    if not CFG.StopOnMax then return end
+    if toast.Text:find("SUDAH MAKSIMAL", 1, true) then
+        enabled = false
+        if sg then
+            local b = sg:FindFirstChildWhichIsA("TextButton")
+            if b then b.Text = "GYM BOT: OFF"; b.BackgroundColor3 = Color3.fromRGB(150, 40, 40) end
+        end
+        notify("Stat sudah maksimal, bot berhenti.")
+        if CFG.ExitOnMax then fire(exitBtn) end
+    end
+end))
+
+-- ---------- auto masuk lagi (opsional) ----------
+local lastPrompt
+local function hookPrompt(p)
+    if p:IsA("ProximityPrompt") then
+        track(p.Triggered:Connect(function(plr)
+            if plr == LP then lastPrompt = p end
+        end))
+    end
+end
+local gym = workspace:FindFirstChild("GYM")
+if gym then
+    for _, d in ipairs(gym:GetDescendants()) do hookPrompt(d) end
+    track(gym.DescendantAdded:Connect(hookPrompt))
+end
+
+local function hookChar(c)
+    track(c:GetAttributeChangedSignal("IsGymming"):Connect(function()
+        if c:GetAttribute("IsGymming") == false and enabled and CFG.AutoReenter
+           and lastPrompt and lastPrompt.Parent then
+            task.wait(1.5)
+            if alive and enabled and not c:GetAttribute("IsGymming") and fireproximityprompt then
+                pcall(fireproximityprompt, lastPrompt)
+            end
+        end
+    end))
+end
+if LP.Character then hookChar(LP.Character) end
+track(LP.CharacterAdded:Connect(hookChar))
+
+-- ---------- tombol ON/OFF ----------
+sg = Instance.new("ScreenGui")
+sg.Name = "GymBotUI"
+sg.ResetOnSpawn = false
+sg.DisplayOrder = 999
+local okParent = pcall(function()
+    sg.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+end)
+if not okParent or not sg.Parent then
+    -- game nge-skip ScreenGui bernama "TouchGui" pas nyembunyiin UI saat gym
+    sg.Name = "TouchGui"
+    sg.Parent = PGui
+end
+
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.fromOffset(104, 30)
+btn.Position = UDim2.new(0, 10, 0.35, 0)
+btn.BackgroundColor3 = Color3.fromRGB(30, 130, 60)
+btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 12
+btn.Text = "GYM BOT: ON"
+btn.BorderSizePixel = 0
+btn.Parent = sg
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+local function setEnabled(v)
+    enabled = v
+    btn.Text = v and "GYM BOT: ON" or "GYM BOT: OFF"
+    btn.BackgroundColor3 = v and Color3.fromRGB(30, 130, 60) or Color3.fromRGB(150, 40, 40)
+end
+
+track(btn.Activated:Connect(function() setEnabled(not enabled) end))
+track(UIS.InputBegan:Connect(function(i, g)
+    if g then return end
+    if i.KeyCode == Enum.KeyCode.RightShift then setEnabled(not enabled) end
+end))
+
+notify(string.format("Aktif | Level %d | AutoHit %s | Fast %s",
+    CFG.Level, tostring(CFG.AutoHit), tostring(CFG.Fast)))
+
+]=====]
+
+SRC.lag = [=====[
+-- Nono Anti-Lag v6.0
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local Lighting         = game:GetService("Lighting")
+local HttpService      = game:GetService("HttpService")
+local Stats            = game:GetService("Stats")
+
+local lp  = Players.LocalPlayer
+local env = (getgenv and getgenv()) or _G
+
+if env.NonoCleanup then pcall(env.NonoCleanup) end
+local oldGui = lp.PlayerGui:FindFirstChild("NonoAntiLag")
+if oldGui then oldGui:Destroy() end
+
+local CONNECTIONS = {}
+local function trackConn(c) CONNECTIONS[#CONNECTIONS + 1] = c; return c end
+local alive = true
+
+local CFG = {
+    fpsTarget       = 60,
+    fpsLowThreshold = 35,
+    renderDist      = 512,
+    playerLODDist   = 80,
+    saveFile        = "NonoAntiLag.json",
+}
+local TIER_DIST = {1, 0.75, 0.5}
+
+local state = {
+    texture = true, shadow = true, post = true, leaf = true, fx = true,
+    anchor = false, sky = false, aggr = false, adaptive = true, auto = false,
+}
+
+local applied, nukeActive, busy = false, false, false
+local fpsCapValue = CFG.fpsTarget
+local userDist    = CFG.renderDist
+local tier        = 0
+
+local HAS_SETFPSCAP = type(setfpscap) == "function"
+local HAS_SETHIDDEN = type(sethiddenproperty) == "function"
+local HAS_GETHIDDEN = type(gethiddenproperty) == "function"
+local HAS_FILE = type(writefile) == "function" and type(readfile) == "function"
+    and type(isfile) == "function"
+
+local function tryFPSCap(fps)
+    if not HAS_SETFPSCAP then return false end
+    pcall(setfpscap, fps)
+    return true
+end
+
+local function saveConfig()
+    if not HAS_FILE then return end
+    pcall(function()
+        writefile(CFG.saveFile, HttpService:JSONEncode({
+            state = state, cap = fpsCapValue, dist = userDist,
+        }))
+    end)
+end
+
+if HAS_FILE then
+    pcall(function()
+        if not isfile(CFG.saveFile) then return end
+        local d = HttpService:JSONDecode(readfile(CFG.saveFile))
+        for k, v in pairs(d.state or {}) do
+            if state[k] ~= nil and type(v) == "boolean" then state[k] = v end
+        end
+        if type(d.cap) == "number" then fpsCapValue = math.clamp(d.cap, 30, 300) end
+        if type(d.dist) == "number" then userDist = math.clamp(d.dist, 64, 1024) end
+    end)
+end
+
+local currentFPS, fpsAcc, fpsFrames = 60, 0, 0
+trackConn(RunService.RenderStepped:Connect(function(dt)
+    fpsAcc += dt
+    fpsFrames += 1
+    if fpsAcc >= 0.5 then
+        currentFPS = math.floor(fpsFrames / fpsAcc + 0.5)
+        fpsAcc, fpsFrames = 0, 0
+    end
+end))
+
+local function colorFPS(fps)
+    return fps >= 55 and Color3.fromRGB(80, 220, 120)
+        or fps >= 40 and Color3.fromRGB(220, 200, 60)
+        or fps >= 25 and Color3.fromRGB(220, 130, 60)
+        or Color3.fromRGB(220, 70, 60)
+end
+
+local weak      = {__mode = "k"}
+local orig      = setmetatable({}, weak)
+local culled    = setmetatable({}, weak)
+local touchedHum = setmetatable({}, weak)
+local humCache  = setmetatable({}, weak)
+local seatCache = setmetatable({}, weak)
+local stashed, hiddenOrig = {}, {}
+local rs = settings().Rendering
+
+local function set(obj, prop, val)
+    if obj[prop] == val then return end
+    local o = orig[obj]
+    if not o then o = {}; orig[obj] = o end
+    if o[prop] == nil then o[prop] = obj[prop] end
+    obj[prop] = val
+end
+
+local function pset(obj, prop, val) pcall(set, obj, prop, val) end
+local function setProp(o, p, v) o[p] = v end
+
+local function stash(obj)
+    if stashed[obj] == nil then stashed[obj] = obj.Parent end
+    obj.Parent = nil
+end
+
+local function hset(obj, prop, val)
+    if not HAS_SETHIDDEN then return end
+    if HAS_GETHIDDEN then
+        local ok, cur = pcall(gethiddenproperty, obj, prop)
+        if ok then hiddenOrig[#hiddenOrig + 1] = {obj, prop, cur} end
+    end
+    pcall(sethiddenproperty, obj, prop, val)
+end
+
+-- Cek model sampai 3 level saja supaya map besar dengan satu Seat tidak ikut terproteksi.
+local function protection(obj)
+    local node, depth, seat = obj.Parent, 0, false
+    while node and node ~= workspace do
+        if node:IsA("Model") then
+            if Players:GetPlayerFromCharacter(node) then return "char" end
+            local h = humCache[node]
+            if h == nil then
+                h = node:FindFirstChildOfClass("Humanoid") ~= nil
+                humCache[node] = h
+            end
+            if h then return "char" end
+            if depth < 3 and not seat then
+                local s = seatCache[node]
+                if s == nil then
+                    s = node:FindFirstChildWhichIsA("BaseSeat") ~= nil
+                    seatCache[node] = s
+                end
+                seat = s
+            end
+            depth += 1
+        end
+        node = node.Parent
+    end
+    return seat and "seat" or nil
+end
+
+local leafKW = {
+    "leaf", "leaves", "daun", "foliage", "tree", "pohon", "bush", "shrub",
+    "grass", "rumput", "plant", "tanaman", "bark", "branch", "vine", "fern",
+}
+local function isLeafName(name)
+    local low = name:lower()
+    for _, k in ipairs(leafKW) do
+        if low:find(k, 1, true) then return true end
+    end
+    return false
+end
+
+local FX     = {ParticleEmitter = true, Trail = true, Beam = true, Fire = true, Smoke = true, Sparkles = true}
+local LIGHT  = {PointLight = true, SpotLight = true, SurfaceLight = true}
+local DECAL  = {Decal = true, Texture = true}
+local CONSTR = {SpringConstraint = true, RopeConstraint = true, RodConstraint = true,
+    HingeConstraint = true, BallSocketConstraint = true, PrismaticConstraint = true}
+local MOVER  = {BodyVelocity = true, BodyPosition = true, BodyForce = true, BodyGyro = true}
+local SELECT = {SelectionBox = true, SelectionSphere = true}
+local HUM_STATES = {
+    Enum.HumanoidStateType.FallingDown,
+    Enum.HumanoidStateType.Ragdoll,
+    Enum.HumanoidStateType.GettingUp,
+}
+local ATMO_PROPS  = {"Density", "Glare", "Haze", "Offset"}
+local WATER_PROPS = {"WaterWaveSize", "WaterWaveSpeed", "WaterReflectance", "WaterTransparency"}
+
+local parts, partIdx, cursor, culledN = {}, {}, 0, 0
+
+local function addPart(p)
+    parts[#parts + 1] = p
+    partIdx[p] = #parts
+end
+
+local function removePart(p)
+    local i = partIdx[p]
+    if not i then return end
+    local last = parts[#parts]
+    parts[i] = last
+    partIdx[last] = i
+    parts[#parts] = nil
+    partIdx[p] = nil
+    if culled[p] then culled[p] = nil; culledN -= 1 end
+end
+
+local function processPart(p)
+    local prot = protection(p)
+    if state.texture then
+        set(p, "Material", Enum.Material.SmoothPlastic)
+        set(p, "Reflectance", 0)
+        if p:IsA("MeshPart") then
+            pset(p, "TextureID", "")
+            pset(p, "RenderFidelity", Enum.RenderFidelity.Performance)
+        end
+    end
+    if state.shadow then set(p, "CastShadow", false) end
+    if prot == "char" then return end
+    if state.leaf and isLeafName(p.Name) then
+        set(p, "Transparency", 1)
+        set(p, "CanCollide", false)
+        return
+    end
+    if state.anchor and not prot and not p.Anchored then set(p, "Anchored", true) end
+    if p.Transparency < 1 and not partIdx[p] then addPart(p) end
+end
+
+-- BillboardGui dan Sound sengaja tidak disentuh.
+local function processObject(obj)
+    local cls = obj.ClassName
+    if cls == "Terrain" then return end
+    if obj:IsA("BasePart") then return processPart(obj) end
+    if cls == "Humanoid" then
+        if obj.Parent ~= lp.Character and not touchedHum[obj] then
+            touchedHum[obj] = true
+            for _, s in ipairs(HUM_STATES) do obj:SetStateEnabled(s, false) end
+        end
+        return
+    end
+    if state.texture then
+        if cls == "SpecialMesh" then return pset(obj, "TextureId", "") end
+        if cls == "SurfaceAppearance" then return stash(obj) end
+        if DECAL[cls] then return pset(obj, "Transparency", 1) end
+    end
+    if state.shadow and LIGHT[cls] then return pset(obj, "Enabled", false) end
+    if state.fx then
+        if FX[cls] then return pset(obj, "Enabled", false) end
+        if cls == "SurfaceGui" and protection(obj) ~= "char" then
+            return pset(obj, "Enabled", false)
+        end
+    end
+    if state.aggr and (CONSTR[cls] or MOVER[cls] or SELECT[cls] or cls == "ClickDetector")
+        and not protection(obj) then
+        if CONSTR[cls] then return pset(obj, "Enabled", false) end
+        if cls == "ClickDetector" then return pset(obj, "MaxActivationDistance", 0) end
+        return stash(obj)
+    end
+end
+
+local queue, qh, qt = {}, 1, 0
+local nukeTotal, nukeDone = 0, 0
+local function enqueue(obj) qt += 1; queue[qt] = obj end
+
+local function updatePlayerLOD()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local cp = cam.CFrame.Position
+    local lodDist = CFG.playerLODDist * TIER_DIST[tier + 1]
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local char = plr ~= lp and plr.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local far = (root.Position - cp).Magnitude > lodDist
+            for _, acc in ipairs(char:GetChildren()) do
+                local h = acc:IsA("Accessory") and acc:FindFirstChild("Handle")
+                if h then
+                    if far then
+                        pset(h, "Transparency", 1)
+                    else
+                        local o = orig[h]
+                        if o and o.Transparency ~= nil then h.Transparency = o.Transparency end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    o.Parent = parent
+    return o
+end
+
+local function corner(o, r)
+    return new("UICorner", {CornerRadius = typeof(r) == "UDim" and r or UDim.new(0, r)}, o)
+end
+
+local function lbl(parent, txt, size, color, props)
+    local t = {
+        Text = txt, Font = Enum.Font.Code, TextSize = size,
+        TextColor3 = color, BackgroundTransparency = 1,
+    }
+    for k, v in pairs(props or {}) do t[k] = v end
+    return new("TextLabel", t, parent)
+end
+
+local GREEN = Color3.fromRGB(0, 255, 136)
+local AMBER = Color3.fromRGB(255, 180, 0)
+local DIM   = Color3.fromRGB(100, 100, 100)
+local PANEL = Color3.fromRGB(18, 18, 18)
+local ROW   = Color3.fromRGB(20, 20, 20)
+local BLUE  = Color3.fromRGB(120, 180, 255)
+local FULL  = UDim.new(1, 0)
+local LEFT, RIGHT = Enum.TextXAlignment.Left, Enum.TextXAlignment.Right
+
+local sg = new("ScreenGui", {
+    Name = "NonoAntiLag", ResetOnSpawn = false, IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999,
+}, lp:WaitForChild("PlayerGui"))
+
+local main = new("Frame", {
+    Name = "Main", Size = UDim2.new(0, 214, 0, 0), Position = UDim2.new(0, 12, 0, 80),
+    BackgroundColor3 = Color3.fromRGB(14, 14, 14), BackgroundTransparency = 0.06,
+    BorderSizePixel = 0, AutomaticSize = Enum.AutomaticSize.Y,
+}, sg)
+corner(main, 10)
+new("UIStroke", {Color = Color3.fromRGB(55, 55, 55), Thickness = 0.8}, main)
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Vertical, SortOrder = Enum.SortOrder.LayoutOrder,
+}, main)
+
+local header = new("Frame", {
+    Name = "Header", Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = ROW,
+    BorderSizePixel = 0, LayoutOrder = 0,
+}, main)
+corner(header, 10)
+new("Frame", {
+    Size = UDim2.new(1, 0, 0.5, 0), Position = UDim2.new(0, 0, 0.5, 0),
+    BackgroundColor3 = ROW, BorderSizePixel = 0,
+}, header)
+
+local dot = new("Frame", {
+    Size = UDim2.new(0, 7, 0, 7), Position = UDim2.new(0, 10, 0.5, -3),
+    BackgroundColor3 = GREEN, BorderSizePixel = 0,
+}, header)
+corner(dot, FULL)
+
+lbl(header, "NONO LAG NUKE", 10, Color3.fromRGB(200, 200, 200), {
+    Size = UDim2.new(1, -62, 1, 0), Position = UDim2.new(0, 22, 0, 0), TextXAlignment = LEFT,
+})
+
+local nBtn = new("TextButton", {
+    Text = "N", Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = GREEN,
+    BackgroundColor3 = Color3.fromRGB(30, 30, 30), Size = UDim2.new(0, 24, 0, 24),
+    Position = UDim2.new(1, -30, 0.5, -12), BorderSizePixel = 0, ZIndex = 5,
+}, header)
+corner(nBtn, FULL)
+local nStroke = new("UIStroke", {Color = Color3.fromRGB(0, 180, 90), Thickness = 1}, nBtn)
+
+local bodyWrap = new("Frame", {
+    Name = "BodyWrapper", Size = UDim2.new(1, 0, 0, 210), BackgroundTransparency = 1,
+    BorderSizePixel = 0, LayoutOrder = 1, ClipsDescendants = true,
+}, main)
+
+local scroll = new("ScrollingFrame", {
+    Name = "Scroll", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+    BorderSizePixel = 0, ScrollBarThickness = 3,
+    ScrollBarImageColor3 = Color3.fromRGB(0, 200, 100), ScrollBarImageTransparency = 0.3,
+    CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.Never,
+}, bodyWrap)
+local body = scroll
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Vertical, SortOrder = Enum.SortOrder.LayoutOrder,
+    Padding = UDim.new(0, 4),
+}, body)
+new("UIPadding", {
+    PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 8),
+    PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 10),
+}, body)
+
+local ord = 0
+local function nextOrd() ord += 1; return ord end
+
+local applyNuke, restoreAll, unload
+
+local fpsRow = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = PANEL, BorderSizePixel = 0,
+    LayoutOrder = nextOrd(),
+}, body)
+corner(fpsRow, 6)
+
+local function fpsCol(x, title, valColor)
+    local col = new("Frame", {
+        Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(x, 0, 0, 0),
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+    }, fpsRow)
+    lbl(col, title, 7, DIM, {Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 0, 5)})
+    return lbl(col, "-- fps", 13, valColor, {
+        Size = UDim2.new(1, 0, 0, 16), Position = UDim2.new(0, 0, 0, 18),
+    })
+end
+local fpsBeforeVal = fpsCol(0, "BEFORE", Color3.fromRGB(200, 100, 80))
+new("Frame", {
+    Size = UDim2.new(0, 1, 0.55, 0), Position = UDim2.new(0.5, 0, 0.225, 0),
+    BackgroundColor3 = Color3.fromRGB(50, 50, 50), BorderSizePixel = 0,
+}, fpsRow)
+local fpsAfterVal = fpsCol(0.5, "AFTER", DIM)
+
+local function infoRow(name, val, color)
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 20), BackgroundColor3 = PANEL, BorderSizePixel = 0,
+        LayoutOrder = nextOrd(),
+    }, body)
+    corner(row, 6)
+    lbl(row, name, 9, DIM, {
+        Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, 6, 0, 0), TextXAlignment = LEFT,
+    })
+    return lbl(row, val, 9, color, {
+        Size = UDim2.new(0.5, -6, 1, 0), Position = UDim2.new(0.5, 0, 0, 0), TextXAlignment = RIGHT,
+    })
+end
+
+local statusVal = infoRow("STATUS", "● READY", GREEN)
+
+local applyBtn = new("TextButton", {
+    Text = "⚡ APPLY NUKE", Font = Enum.Font.Code, TextSize = 10,
+    TextColor3 = Color3.new(0, 0, 0), BackgroundColor3 = Color3.fromRGB(0, 220, 110),
+    Size = UDim2.new(1, 0, 0, 28), BorderSizePixel = 0, LayoutOrder = nextOrd(),
+}, body)
+corner(applyBtn, 6)
+applyBtn.MouseButton1Click:Connect(function() applyNuke() end)
+
+local function btnRow()
+    local r = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, LayoutOrder = nextOrd(),
+    }, body)
+    new("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4),
+    }, r)
+    return r
+end
+
+local function smallBtn(parent, txt, color, n, onClick)
+    local b = new("TextButton", {
+        Text = txt, Font = Enum.Font.Code, TextSize = 9, TextColor3 = color,
+        BackgroundColor3 = Color3.fromRGB(30, 30, 30), BorderSizePixel = 0,
+        Size = UDim2.new(1 / n, -4, 1, 0),
+    }, parent)
+    corner(b, 6)
+    b.MouseButton1Click:Connect(onClick)
+    return b
+end
+
+local actionRow = btnRow()
+smallBtn(actionRow, "↺ RESTORE", Color3.fromRGB(200, 200, 200), 2, function() restoreAll() end)
+smallBtn(actionRow, "✕ UNLOAD", Color3.fromRGB(220, 90, 80), 2, function() unload() end)
+
+local logBox = new("TextLabel", {
+    Text = "ready.", Font = Enum.Font.Code, TextSize = 8, TextColor3 = Color3.fromRGB(80, 80, 80),
+    BackgroundColor3 = Color3.fromRGB(8, 8, 8), Size = UDim2.new(1, 0, 0, 28),
+    TextWrapped = true, TextXAlignment = LEFT, BorderSizePixel = 0, LayoutOrder = nextOrd(),
+}, body)
+corner(logBox, 5)
+new("UIPadding", {
+    PaddingLeft = UDim.new(0, 5), PaddingTop = UDim.new(0, 3), PaddingRight = UDim.new(0, 5),
+}, logBox)
+
+local function log(msg) logBox.Text = "> " .. msg end
+local function setStatus(t, c) statusVal.Text = t; statusVal.TextColor3 = c end
+
+local plrVal    = infoRow("Players", "1 online", BLUE)
+local netVal    = infoRow("Ping / Mem", "-- / --", BLUE)
+local hiddenVal = infoRow("Hidden", "0 parts", BLUE)
+
+local activeSlider
+
+local function makeSlider(name, init, minV, maxV, color, snap, onChange)
+    local frame = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = ROW, BorderSizePixel = 0,
+        LayoutOrder = nextOrd(),
+    }, body)
+    corner(frame, 6)
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+        PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+    }, frame)
+    new("UIListLayout", {FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 5)}, frame)
+
+    local top = new("Frame", {Size = UDim2.new(1, 0, 0, 12), BackgroundTransparency = 1}, frame)
+    lbl(top, name, 9, Color3.fromRGB(170, 170, 170), {
+        Size = UDim2.new(0.6, 0, 1, 0), TextXAlignment = LEFT,
+    })
+    local valLbl = lbl(top, tostring(init), 9, color, {
+        Size = UDim2.new(0.4, 0, 1, 0), Position = UDim2.new(0.6, 0, 0, 0), TextXAlignment = RIGHT,
+    })
+
+    local track = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = Color3.fromRGB(38, 38, 38), BorderSizePixel = 0,
+    }, frame)
+    corner(track, FULL)
+    local fill = new("Frame", {BackgroundColor3 = color, BorderSizePixel = 0}, track)
+    corner(fill, FULL)
+    local thumb = new("TextButton", {
+        Size = UDim2.new(0, 16, 0, 16), AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Color3.fromRGB(240, 240, 240), Text = "", BorderSizePixel = 0, ZIndex = 10,
+    }, track)
+    corner(thumb, FULL)
+    local hit = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 22), Position = UDim2.new(0, 0, 0.5, -11),
+        BackgroundTransparency = 1, Text = "", ZIndex = 8,
+    }, track)
+
+    local s = {onChange = onChange}
+    function s.set(raw)
+        local v = snap and math.floor(raw / snap) * snap or math.floor(raw)
+        v = math.clamp(v, minV, maxV)
+        local pct = (v - minV) / (maxV - minV)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        thumb.Position = UDim2.new(pct, 0, 0.5, 0)
+        valLbl.Text = tostring(v)
+        return v
+    end
+    function s.fromX(x)
+        local w = math.max(track.AbsoluteSize.X, 1)
+        return s.set(minV + math.clamp((x - track.AbsolutePosition.X) / w, 0, 1) * (maxV - minV))
+    end
+
+    -- Scroll dimatikan selama drag supaya slider tidak ikut menggulung panel di layar sentuh.
+    local function startDrag(input)
+        local t = input.UserInputType
+        if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
+            activeSlider = s
+            scroll.ScrollingEnabled = false
+            onChange(s.fromX(input.Position.X))
+        end
+    end
+    hit.InputBegan:Connect(startDrag)
+    thumb.InputBegan:Connect(startDrag)
+
+    s.set(init)
+    return s
+end
+
+makeSlider("FPS Cap (bypass)", fpsCapValue, 30, 300, BLUE, 5, function(v)
+    fpsCapValue = v
+    tryFPSCap(v)
+end)
+
+local distSlider = makeSlider("Render Distance", userDist, 64, 1024, Color3.fromRGB(0, 200, 100), 64,
+    function(v) userDist = v end)
+
+local toggleRefresh = {}
+
+local PRESETS = {
+    {"SAFE", {texture = true, shadow = true, post = true, leaf = false, fx = false,
+        anchor = false, sky = false, aggr = false}, 768},
+    {"BALANCED", {texture = true, shadow = true, post = true, leaf = true, fx = true,
+        anchor = false, sky = false, aggr = false}, 512},
+    {"MAX", {texture = true, shadow = true, post = true, leaf = true, fx = true,
+        anchor = true, sky = true, aggr = true}, 256},
+}
+
+local presetRow = btnRow()
+for _, p in ipairs(PRESETS) do
+    smallBtn(presetRow, p[1], BLUE, 3, function()
+        for k, v in pairs(p[2]) do
+            state[k] = v
+            if toggleRefresh[k] then toggleRefresh[k](true) end
+        end
+        userDist = distSlider.set(p[3])
+        saveConfig()
+        log("preset " .. p[1] .. ", tekan APPLY")
+    end)
+end
+
+local function makeToggle(name, key)
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 26), BackgroundColor3 = ROW, BorderSizePixel = 0,
+        LayoutOrder = nextOrd(),
+    }, body)
+    corner(row, 6)
+    lbl(row, name, 9, Color3.fromRGB(180, 180, 180), {
+        Size = UDim2.new(1, -44, 1, 0), Position = UDim2.new(0, 8, 0, 0), TextXAlignment = LEFT,
+    })
+    local pill = new("Frame", {
+        Size = UDim2.new(0, 28, 0, 14), Position = UDim2.new(1, -34, 0.5, -7), BorderSizePixel = 0,
+    }, row)
+    corner(pill, FULL)
+    local knob = new("Frame", {
+        Size = UDim2.new(0, 10, 0, 10), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+    }, pill)
+    corner(knob, FULL)
+
+    local function refresh(animate)
+        local on = state[key]
+        local pc = on and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(55, 55, 55)
+        local kp = on and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5)
+        if animate then
+            TweenService:Create(pill, TweenInfo.new(0.12), {BackgroundColor3 = pc}):Play()
+            TweenService:Create(knob, TweenInfo.new(0.12), {Position = kp}):Play()
+        else
+            pill.BackgroundColor3 = pc
+            knob.Position = kp
+        end
+    end
+    refresh(false)
+    toggleRefresh[key] = refresh
+
+    local btn = new("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", ZIndex = 5,
+    }, row)
+    btn.MouseButton1Click:Connect(function()
+        state[key] = not state[key]
+        refresh(true)
+        saveConfig()
+    end)
+end
+
+for _, t in ipairs({
+    {"Nuke Texture", "texture"}, {"Kill Shadow", "shadow"}, {"Kill Post FX", "post"},
+    {"Hide Leaves", "leaf"}, {"Kill FX", "fx"}, {"Anchor Parts", "anchor"},
+    {"Kill Skybox", "sky"}, {"Aggressive", "aggr"}, {"Adaptive FPS", "adaptive"},
+    {"Auto Apply", "auto"},
+}) do
+    makeToggle(t[1], t[2])
+end
+
+local bodyVisible = true
+nBtn.MouseButton1Click:Connect(function()
+    bodyVisible = not bodyVisible
+    bodyWrap.Visible = bodyVisible
+    local c = bodyVisible and GREEN or Color3.fromRGB(120, 120, 120)
+    local info = TweenInfo.new(0.15)
+    TweenService:Create(dot, info, {BackgroundColor3 = c}):Play()
+    TweenService:Create(nBtn, info, {TextColor3 = c}):Play()
+    TweenService:Create(nStroke, info, {
+        Color = bodyVisible and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(80, 80, 80),
+    }):Play()
+end)
+
+local dragStart, dragOrigin, dragActive
+local DEADZONE = 8
+
+local function inside(gui, pos)
+    local a, s = gui.AbsolutePosition, gui.AbsoluteSize
+    return pos.X >= a.X and pos.X <= a.X + s.X and pos.Y >= a.Y and pos.Y <= a.Y + s.Y
+end
+
+local function isPointer(input)
+    local t = input.UserInputType
+    return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+end
+
+header.InputBegan:Connect(function(input)
+    if isPointer(input) and not inside(nBtn, input.Position) then
+        dragStart, dragOrigin, dragActive = input.Position, main.Position, false
+    end
+end)
+
+trackConn(UserInputService.InputChanged:Connect(function(input)
+    local t = input.UserInputType
+    if t ~= Enum.UserInputType.MouseMovement and t ~= Enum.UserInputType.Touch then return end
+    if activeSlider then
+        activeSlider.onChange(activeSlider.fromX(input.Position.X))
+        return
+    end
+    if not dragStart then return end
+    local delta = input.Position - dragStart
+    if not dragActive and (math.abs(delta.X) > DEADZONE or math.abs(delta.Y) > DEADZONE) then
+        dragActive = true
+    end
+    if dragActive then
+        local cam = workspace.CurrentCamera
+        local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+        local x = math.clamp(dragOrigin.X.Offset + delta.X, 0, math.max(0, vp.X - main.AbsoluteSize.X))
+        local y = math.clamp(dragOrigin.Y.Offset + delta.Y, 0, math.max(0, vp.Y - 34))
+        main.Position = UDim2.new(0, x, 0, y)
+    end
+end))
+
+trackConn(UserInputService.InputEnded:Connect(function(input)
+    if not isPointer(input) then return end
+    dragStart, dragActive = nil, false
+    if activeSlider then
+        activeSlider = nil
+        scroll.ScrollingEnabled = true
+        saveConfig()
+    end
+end))
+
+trackConn(UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.RightControl then sg.Enabled = not sg.Enabled end
+end))
+
+local okStreak = 0
+local function adaptiveStep()
+    if not state.adaptive then tier = 0; return end
+    -- Ambang turun 60% dari cap supaya cap rendah tidak memicu adaptive terus.
+    local low  = math.min(CFG.fpsLowThreshold, fpsCapValue * 0.6)
+    local good = math.min(50, fpsCapValue * 0.9)
+    if currentFPS < low then
+        okStreak = 0
+        if tier < 2 then
+            tier += 1
+            log("adaptive T" .. tier .. ": dist " .. math.floor(userDist * TIER_DIST[tier + 1]))
+            setStatus("● ADAPTIVE T" .. tier, AMBER)
+        end
+    elseif currentFPS >= good and tier > 0 then
+        okStreak += 1
+        if okStreak >= 2 then
+            okStreak = 0
+            tier -= 1
+            log("adaptive T" .. tier .. ": pulih")
+            setStatus(tier > 0 and "● ADAPTIVE T" .. tier or "● ACTIVE", tier > 0 and AMBER or GREEN)
+        end
+    else
+        okStreak = 0
+    end
+end
+
+local function applyGlobals()
+    pset(rs, "QualityLevel", Enum.QualityLevel.Level01)
+    if state.shadow then
+        pset(Lighting, "GlobalShadows", false)
+        pset(Lighting, "ShadowSoftness", 0)
+        pset(Lighting, "EnvironmentDiffuseScale", 0)
+        pset(Lighting, "EnvironmentSpecularScale", 0)
+    end
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if state.post and v:IsA("PostEffect") then
+            pset(v, "Enabled", false)
+        elseif state.post and v:IsA("Atmosphere") then
+            for _, p in ipairs(ATMO_PROPS) do pset(v, p, 0) end
+        elseif state.sky and v:IsA("Sky") then
+            pcall(stash, v)
+        end
+    end
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if terrain and state.texture then
+        for _, p in ipairs(WATER_PROPS) do pset(terrain, p, 0) end
+        hset(terrain, "Decoration", false)
+    end
+end
+
+local function setApplyIdle()
+    applyBtn.Text = "⚡ APPLY NUKE"
+    applyBtn.BackgroundColor3 = Color3.fromRGB(0, 220, 110)
+    applyBtn.TextColor3 = Color3.new(0, 0, 0)
+end
+
+local function onNukeDone()
+    nukeActive = false
+    log(nukeTotal .. " obj | " .. culledN .. " hidden ✓")
+    setStatus(tier > 0 and "● ADAPTIVE T" .. tier or "● ACTIVE", tier > 0 and AMBER or GREEN)
+    applyBtn.Text = "⚡ RE-APPLY"
+    applyBtn.BackgroundColor3 = Color3.fromRGB(0, 220, 110)
+    applyBtn.TextColor3 = Color3.new(0, 0, 0)
+end
+
+applyNuke = function()
+    if busy or nukeActive then return end
+    if not applied then
+        fpsBeforeVal.Text = currentFPS .. " fps"
+        fpsBeforeVal.TextColor3 = colorFPS(currentFPS)
+    end
+    applied, nukeActive = true, true
+    setStatus("● RUNNING", AMBER)
+    applyBtn.Text = "..."
+    applyBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    applyBtn.TextColor3 = Color3.fromRGB(0, 220, 110)
+    log("fps cap " .. fpsCapValue .. (tryFPSCap(fpsCapValue) and " ✓" or " (no executor)"))
+    applyGlobals()
+    local list = workspace:GetDescendants()
+    table.move(list, 1, #list, qt + 1, queue)
+    qt += #list
+    nukeTotal, nukeDone = #list, 0
+end
+
+-- Sinkron saat unload supaya state sudah bersih sebelum skrip berikutnya berjalan.
+local function runRestore(sync)
+    applied, nukeActive, tier = false, false, 0
+    queue, qh, qt = {}, 1, 0
+    local t0 = os.clock()
+    local function pace()
+        if not sync and os.clock() - t0 > 0.008 then task.wait(); t0 = os.clock() end
+    end
+    for obj, props in pairs(orig) do
+        for prop, val in pairs(props) do pcall(setProp, obj, prop, val) end
+        pace()
+    end
+    for obj, parent in pairs(stashed) do
+        if parent:IsDescendantOf(game) then pcall(setProp, obj, "Parent", parent) end
+        pace()
+    end
+    if HAS_SETHIDDEN then
+        for i = #hiddenOrig, 1, -1 do
+            local h = hiddenOrig[i]
+            pcall(sethiddenproperty, h[1], h[2], h[3])
+        end
+    end
+    for hum in pairs(touchedHum) do
+        for _, s in ipairs(HUM_STATES) do pcall(hum.SetStateEnabled, hum, s, true) end
+    end
+    table.clear(orig); table.clear(stashed); table.clear(hiddenOrig); table.clear(touchedHum)
+    table.clear(culled); table.clear(parts); table.clear(partIdx)
+    culledN, cursor = 0, 0
+    tryFPSCap(CFG.fpsTarget)
+end
+
+restoreAll = function()
+    if busy then return end
+    busy = true
+    setStatus("● RESTORING", AMBER)
+    task.spawn(function()
+        runRestore(false)
+        setApplyIdle()
+        fpsAfterVal.Text = "-- fps"
+        fpsAfterVal.TextColor3 = DIM
+        setStatus("● READY", GREEN)
+        log("restored")
+        busy = false
+    end)
+end
+
+unload = function()
+    if not alive then return end
+    alive = false
+    for _, c in ipairs(CONNECTIONS) do pcall(function() c:Disconnect() end) end
+    runRestore(true)
+    if env.NonoCleanup == unload then env.NonoCleanup = nil end
+    sg:Destroy()
+end
+
+trackConn(workspace.DescendantAdded:Connect(function(obj)
+    if not applied then return end
+    if obj.ClassName == "Humanoid" and obj.Parent then humCache[obj.Parent] = true end
+    enqueue(obj)
+end))
+
+trackConn(workspace.DescendantRemoving:Connect(function(obj)
+    if partIdx[obj] then removePart(obj) end
+end))
+
+local lodTimer, adaptTimer, logTimer = 0, 0, 0
+trackConn(RunService.Heartbeat:Connect(function(dt)
+    if not applied then return end
+    local t0 = os.clock()
+    local budget = nukeActive and 0.006 or 0.0015
+
+    while qh <= qt and os.clock() - t0 < budget do
+        local obj = queue[qh]
+        queue[qh] = nil
+        qh += 1
+        if obj.Parent then pcall(processObject, obj) end
+        nukeDone += 1
+    end
+    if qh > qt and qt > 0 then queue, qh, qt = {}, 1, 0 end
+
+    local n = #parts
+    local cam = workspace.CurrentCamera
+    if n > 0 and cam then
+        local cp = cam.CFrame.Position
+        local far = userDist * TIER_DIST[tier + 1]
+        local near = far * 0.85
+        local i = cursor
+        for _ = 1, math.min(n, math.max(400, math.floor(n / 30))) do
+            i = i % n + 1
+            local p = parts[i]
+            -- Ukuran part dikurangi dari jarak supaya lantai besar tidak ikut hilang.
+            local d = (p.Position - cp).Magnitude - p.Size.Magnitude * 0.5
+            if d > far then
+                if not culled[p] then
+                    culled[p] = true
+                    culledN += 1
+                    set(p, "Transparency", 1)
+                end
+            elseif d < near and culled[p] then
+                culled[p] = nil
+                culledN -= 1
+                local o = orig[p]
+                if o and o.Transparency ~= nil then p.Transparency = o.Transparency end
+            end
+        end
+        cursor = i
+    end
+
+    if nukeActive then
+        logTimer += dt
+        if logTimer >= 0.25 then
+            logTimer = 0
+            log("nuking " .. math.min(nukeDone, nukeTotal) .. "/" .. nukeTotal)
+        end
+        if qh > qt then onNukeDone() end
+        return
+    end
+
+    lodTimer += dt
+    if lodTimer >= 1 then lodTimer = 0; updatePlayerLOD() end
+    adaptTimer += dt
+    if adaptTimer >= 3 then adaptTimer = 0; adaptiveStep() end
+end))
+
+task.spawn(function()
+    local n = 0
+    while alive do
+        task.wait(0.5)
+        n += 1
+        local fps = currentFPS
+        local target = applied and fpsAfterVal or fpsBeforeVal
+        target.Text = fps .. " fps"
+        target.TextColor3 = colorFPS(fps)
+        if n % 2 == 0 then
+            pcall(function()
+                local c = #Players:GetPlayers()
+                plrVal.Text = c .. " online"
+                plrVal.TextColor3 = c > 10 and Color3.fromRGB(220, 130, 60)
+                    or c > 5 and Color3.fromRGB(220, 200, 60) or BLUE
+                hiddenVal.Text = culledN .. " parts"
+                local okP, ping = pcall(function()
+                    return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+                end)
+                netVal.Text = (okP and math.floor(ping) or "--") .. "ms / "
+                    .. math.floor(Stats:GetTotalMemoryUsageMb()) .. "MB"
+            end)
+        end
+    end
+end)
+
+env.NonoCleanup = unload
+
+if state.auto then
+    task.delay(1.5, function()
+        if alive and not applied then applyNuke() end
+    end)
+end
+
+print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", HAS_SETHIDDEN,
+    "| file:", HAS_FILE)
+
+]=====]
+
+SRC.parry = [=====[
+-- ============================================================
+--  HIGH SCHOOL ANIME — Combat Tools v13.4 WRAITH (attack-tagged guard log)
+--
+--  v13.4 (patch di atas v13.3):
+--  · GUARD LOG sekarang nyebut SERANGAN di balik tiap drop guard:
+--      [GUARD] 0.93 -> 0.49 (-0.44) parry | hold=true sends=3 prev=11 win=2 | atk=NamaAnim|H|pred|0.31s
+--    atk = nama animasi | H (heavy) atau L (light) | pred (timing udah
+--    dipelajari) atau unk | umur request (detik sebelum guard turun).
+--    kind = "parry" kalau ParryFX-mu nyala <=0.15s dari drop, selain itu "other"
+--    (kena hit / block biasa).
+--  · JENDELA GAK NUMPUK: request yang sama (hit sama / animasi sama yang
+--    overlap) digabung jadi satu jendela, bukan nambah entri baru tiap
+--    heartbeat (win sebelumnya bisa sampai 11).
+--
+--  HIGH SCHOOL ANIME — Combat Tools v13.3 WRAITH (single-press on learned timing)
+--
+--  v13.3 (patch di atas v13.2):
+--  · Jendela dengan timing yang SUDAH dipelajari sekarang pencet block
+--    SEKALI di waktu yang pas lalu ditahan (CFG.PredRefresh = 0), persis
+--    kayak parry manual. Refresh di sini gak ada gunanya: kiriman yang
+--    nyampe server sesudah hit bisa nge-arm ulang timestamp parry dan
+--    (dugaan) bikin guard kepotong 2x (50 vs 26 manual).
+--  · Refresh (CFG.RefreshMax) cuma buat animasi yang belum dipelajari.
+--
+--  HIGH SCHOOL ANIME — Combat Tools v13.2 WRAITH (hold + eco + guard-aware)
+--
+--  v13.2 (patch di atas v13.1):
+--  · REFRESH DIBATASI: tiap jendela hit cuma boleh kirim block
+--    1x (pencet) + CFG.RefreshMax refresh (default 2), bukan terus-
+--    terusan. Tujuannya nurunin biaya guard per parry (parry manual
+--    = ~26 poin guard, v13 lewat script = ~50).
+--  · EcoGuardLow 0.25 -> 0.35 (satu parry ~0.26, jadi 0.25 terlalu mepet).
+--  · GUARD LOG: tiap GuardValue turun, console nge-print berapa turunnya
+--    plus status hold (CFG.GuardLog = false buat mematikan). Pakai ini
+--    buat nentuin RefreshMax / HoldRefresh yang pas.
+--
+--  HIGH SCHOOL ANIME — Combat Tools v13.1 WRAITH (hold + eco build)
+--
+--  v13.1 (patch di atas v13.0):
+--  · MODE HEMAT GUARD: hold default lebih pendek (HoldTail 0.08,
+--    HoldUnknown 0.30, HoldHeavy 0.45) dan hold buat animasi yang
+--    BELUM dipelajari dilewati / diputus kalau GuardValue < 0.25
+--    (CFG.EcoSkipLow / EcoGuardLow). Animasi yang udah dipelajari
+--    dan ragdoll tetap jalan.
+--  · LOCK LEBIH LAMA: EXCHANGE_TTL 1.4s -> 8s (lock bertahan ~8,3s
+--    setelah baku hantam terakhir; tetap lepas kalau target invalid
+--    atau lewat Leash).
+--
+--  HIGH SCHOOL ANIME — Combat Tools v13.0 WRAITH (hold build)
+--
+--  v13.0 HOLD (patch di atas v12.0):
+--  · HOLD MANAGER: tap lepas-pencet diganti satu block yang DITAHAN
+--    sepanjang jendela hit. Di CombatConfig.BlockState, Set(false)
+--    ngapus timestamp parry (v_u_93[p]=nil) dan ConsumeParry() cuma
+--    lolos kalau block mulai <= window detik sebelum hit. Tap yang
+--    dilepas sebelum hit mendarat = celah = parry hilang = kena.
+--  · RefreshMode: "true" (kirim true berulang) atau "cycle"
+--    (false+true di frame yang sama). Ganti kalau salah satu jelek.
+--  · Overlap: banyak penyerang / combo gak saling ngunci lagi
+--    (spamLock dibuang, jendela digabung).
+--  · FIX ParryFX: event ini di-broadcast ke semua pemain. Dulu parry
+--    pemain lain dihitung sebagai sukses kamu dan ngotorin belajar
+--    lead + hit-delay. Sekarang cuma yang parrier == karaktermu.
+--  · Delay reaksi acak (ReactDelay) dibuang buat jalur non-prediksi.
+--  · Jeda minimal antar request 0.30s -> CFG.RefireGap (0.05s).
+--
+--  HIGH SCHOOL ANIME — Combat Tools v12.0 WRAITH (accuracy build)
+--  (v11.0 by Nono, merged patches v11.1 + v11.2)
+--
+--  v12.0 ACCURACY:
+--  · ADAPTIVE LEAD: bot nyoba beberapa lead (berapa ms sebelum hit
+--    tap pertama dikirim) dan belajar sendiri mana yang bikin parry
+--    sukses (ParryFX) vs kena damage. Gak perlu tau parry window game.
+--  · Hit-delay disimpen ke file (writefile) -> gak mulai dari nol
+--    tiap rejoin. Prediksi aktif dari sampel pertama (CFG.MinSamples).
+--  · Key animasi = Name + AnimationId (gak bentrok kalau nama sama).
+--  · Belajar juga dari pemain lain yang lagi berantem di sekitar.
+--  · Parry tetap jalan pas kamu lagi mukul (CFG.ParryWhileSwinging).
+--  · Burst terprediksi lebih rapat (CFG.PredTaps), rate limiter floor naik.
+--  · WRAITH_DUMP() di console: statistik lead + hit-delay ke clipboard.
+--
+--  v11.2 LOCK (strict, hit-only):
+--  · Lock triggers ONLY from two events, nothing else:
+--      HIT-IN  = my HP dropped AND a real attacker is identified
+--                (attacked <0.85s ago, in range, facing me)
+--      HIT-OUT = enemy HP dropped within my swing window,
+--                in range and in front of me
+--  · NO fallback to "nearest player" anywhere
+--  · FX remotes (ReactionFX/HitRun/KickCombo/CounterHit/HeavyPunch)
+--    no longer lock. They only record attack evidence.
+--  · Jumping / falling / ragdoll no longer lock
+--
+--  v11.2 PARRY:
+--  · Evidence-gated: only parries when a nearby player is actually
+--    attacking (anim w/ Action priority, attack attr, atk event)
+--  · Adaptive hit-timing: learns per-animation hit delay from your
+--    own hits-taken + successful parries, then times the tap cluster
+--    to land right before the hit (after 2 samples per animation)
+--  · Reaction/hit-react animations ignored (no parry on "gethit")
+--  · Removed velocity pre-fire scan (main source of false parries)
+-- ============================================================
+
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local UIS         = game:GetService("UserInputService")
+local Stats       = game:GetService("Stats")
+local TweenSvc    = game:GetService("TweenService")
+local RepStorage  = game:GetService("ReplicatedStorage")
+
+local LP     = Players.LocalPlayer
+local PGui   = LP:WaitForChild("PlayerGui")
+
+math.randomseed(math.floor(os.clock() * 1e9) % (2^31 - 1))
+
+local HttpService = game:GetService("HttpService")
+local env = (getgenv and getgenv()) or _G
+if env.__WRAITH12 then warn("[WRAITH] sudah jalan, rejoin dulu kalau mau reload"); return end
+
+-- ============================================================
+--  CONFIG v12
+-- ============================================================
+local CFG = {
+    ParryWhileSwinging = true,   -- true = tetep parry walau lagi mukul (bisa motong combo sendiri)
+    MinSamples      = 1,         -- sampel hit-delay minimal sebelum timing diprediksi
+    PredTaps        = 3,         -- jumlah tap max pas timing udah diprediksi
+    LeadSet         = {0.02, 0.05, 0.08, 0.12, 0.17, 0.23},  -- kandidat lead (detik sebelum hit)
+    LearnFromOthers = true,      -- belajar hit-delay dari pemain lain yang kena hit
+    SaveFile        = "wraith_v12_timing.json",
+    RateFloor       = 8,         -- rate limiter: batas bawah tap/detik
+    RateCeil        = 22,
+    RateStart       = 14,
+
+    -- v13 HOLD
+    HoldRefresh     = true,      -- true = refresh block selama jendela; false = pencet sekali lalu tahan
+    RefreshMode     = "true",    -- "true" = FireServer(true) berulang | "cycle" = false+true di frame sama
+    HoldTail        = 0.08,      -- tahan segini lama setelah prediksi hit (detik) [v13.1: dulu 0.14]
+    HoldUnknown     = 0.30,      -- durasi tahan kalau hit-delay animasi belum dipelajari [dulu 0.42]
+    HoldHeavy       = 0.45,      -- sama, buat serangan heavy [dulu 0.60]
+    EcoSkipLow      = true,      -- hemat guard: lewati/putus hold animasi yang belum dipelajari kalau guard rendah
+    EcoGuardLow     = 0.35,      -- batas GuardValue (0..1) buat mode hemat [v13.2: dulu 0.25]
+    RefreshMax      = 2,         -- refresh maksimal per jendela (animasi BELUM dipelajari) setelah pencet pertama
+    PredRefresh     = 0,         -- refresh maksimal per jendela yang timing-nya SUDAH dipelajari (0 = pencet sekali)
+    GuardLog        = true,      -- print tiap GuardValue turun (buat tuning)
+    HoldRagdoll     = 0.32,      -- sama, pas ragdoll
+    RefireGap       = 0.05,      -- jeda minimal antar request parry (dulu 0.30)
+}
+
+-- ============================================================
+--  REMOTES
+-- ============================================================
+local CR = RepStorage:WaitForChild("CombatRemotes", 10)
+if not CR then warn("[WRAITH] CombatRemotes missing"); return end
+local function WR(n) return CR:WaitForChild(n, 5) end
+
+local RequestBlock  = WR("RequestBlock")
+local ReactionFX    = WR("ReactionFX")
+local ParryFX       = WR("ParryFX")
+local CounterHitFX  = WR("CounterHitFX")
+local GuardBreakFX  = WR("GuardBreakFX")
+local HitRunFX      = WR("HitRunFX")
+local KickComboFX   = WR("KickComboFX")
+local HeavyPunchFX  = WR("HeavyPunchFX")
+
+if not RequestBlock then warn("[WRAITH] RequestBlock missing"); return end
+env.__WRAITH12 = true
+
+-- ============================================================
+--  NAME ROTATION
+-- ============================================================
+local _NC = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+local function RandName(n)
+    local t = {}
+    for i = 1, n do local r = math.random(1,#_NC); t[i]=_NC:sub(r,r) end
+    return table.concat(t)
+end
+local ATT_NAME = RandName(12)
+local AO_NAME  = RandName(12)
+local _rotT    = os.clock() + 55 + math.random(0,20)
+local function MaybeRotate()
+    if os.clock() < _rotT then return end
+    ATT_NAME = RandName(12); AO_NAME = RandName(12)
+    _rotT = os.clock() + 55 + math.random(0,20)
+end
+
+-- ============================================================
+--  FPS — rolling 60-sample mean
+-- ============================================================
+local FPS = { v = 60, ft = 1/60, buf = {}, n = 0, cap = 60, last = 0 }
+RunService.Heartbeat:Connect(function(dt)
+    FPS.n = FPS.n + 1
+    FPS.buf[((FPS.n-1) % FPS.cap) + 1] = dt
+    local now = os.clock()
+    if now - FPS.last < 0.20 then return end
+    FPS.last = now
+    local sum, cnt = 0, math.min(FPS.n, FPS.cap)
+    for i = 1, cnt do sum = sum + (FPS.buf[i] or 0) end
+    FPS.ft = sum / cnt
+    FPS.v  = math.clamp(math.floor(1 / math.max(FPS.ft, 0.001)), 10, 500)
+end)
+
+-- ============================================================
+--  PING — rolling 24-sample, EMA, variance
+-- ============================================================
+local Ping = { v=80, jit=0, ema=80, buf={}, n=0, cap=24, last=0 }
+local function _pingUpdate()
+    local now = os.clock()
+    if now - Ping.last < 0.18 then return end
+    Ping.last = now
+    local ok, raw = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    if not ok or not raw or raw <= 0 then return end
+    Ping.n = Ping.n + 1
+    Ping.buf[((Ping.n-1) % Ping.cap)+1] = raw
+    Ping.ema = Ping.ema * 0.82 + raw * 0.18
+    local cnt = math.min(Ping.n, Ping.cap)
+    local s, s2 = 0, 0
+    for i = 1, cnt do local x = Ping.buf[i] or 0; s=s+x; s2=s2+x*x end
+    Ping.v   = s / cnt
+    Ping.jit = math.sqrt(math.max(0, s2/cnt - (s/cnt)^2))
+end
+local function GetPing()   _pingUpdate(); return Ping.v   end
+local function GetJitter() _pingUpdate(); return Ping.jit  end
+
+-- ============================================================
+--  CORE TIMING — everything derived from live FPS + Ping
+-- ============================================================
+local function PingLead()
+    local p = GetPing(); local j = GetJitter()
+    return math.clamp((p - 20) / 850 * 3.5, 0.003, 0.26)
+         + math.clamp(j / 1600, 0, 0.032)
+         + math.clamp(math.max(0, Ping.ema - p) / 1800, 0, 0.014)
+end
+
+local function TapDuration(urgency)
+    local fps = math.max(FPS.v, 10)
+    local p   = GetPing(); local j = GetJitter()
+
+    local lo = math.clamp(0.022 - (fps - 30)/1800, 0.009, 0.022)
+    local hi = math.clamp(0.055 + (p - 50)/1800 + j/2500, 0.030, 0.095)
+
+    local scLo, scHi =
+        (urgency == "ragdoll" or urgency == "prearm") and 0.52 or
+        (urgency == "instant")                         and 0.62 or
+        (urgency == "reactive")                        and 0.80 or 1.0,
+
+        (urgency == "ragdoll" or urgency == "prearm") and 0.60 or
+        (urgency == "instant")                         and 0.70 or
+        (urgency == "reactive")                        and 0.86 or 1.0
+
+    lo = lo * scLo; hi = hi * scHi
+    return lo + (hi - lo) * math.random()
+end
+
+-- v11.2: taps per burst (tighter than v11.0, wider than v11.1)
+local function BurstCount(heavy, urgency, cap)
+    local n
+    if urgency == "ragdoll" then
+        n = math.random(5, 8)
+    elseif urgency == "prearm" or urgency == "instant" then
+        n = heavy and math.random(4, 7) or math.random(3, 5)
+    elseif heavy then
+        n = math.random(4, 6)
+    else
+        n = math.random(3, 5)
+    end
+    return math.min(n, cap or math.huge)
+end
+
+local function ReactDelay(heavy, urgency)
+    local fps = FPS.v
+    local fsc = math.clamp((fps - 30) / 140, 0, 0.50)
+
+    if urgency == "prearm" then
+        return math.clamp(0.004 + math.random() * 0.016, 0.004, 0.020)
+    elseif urgency == "ragdoll" or urgency == "instant" then
+        return math.clamp(0.006 + math.random() * 0.022, 0.006, 0.028)
+    elseif urgency == "reactive" then
+        return math.clamp(0.028 + math.random() * 0.034, 0.028, 0.062)
+    elseif heavy then
+        local lo = math.max(0.014, 0.036 * (1 - fsc))
+        local hi = math.max(0.038, 0.075 * (1 - fsc * 0.5))
+        return lo + math.random() * (hi - lo)
+    else
+        local lo = math.max(0.026, 0.065 * (1 - fsc * 0.5))
+        local hi = math.max(0.062, 0.145 * (1 - fsc * 0.3))
+        return lo + math.random() * (hi - lo)
+    end
+end
+
+local function BurstCD(heavy)
+    local p    = GetPing()
+    local base = heavy and 0.075 or 0.100
+    if p > 240 then return math.max(base * 0.20, base - 0.090)
+    elseif p > 180 then return math.max(base * 0.32, base - 0.068)
+    elseif p > 120 then return math.max(base * 0.48, base - 0.048)
+    elseif p > 70  then return math.max(base * 0.68, base - 0.024) end
+    return base
+end
+
+-- ============================================================
+--  MATH UTILS
+-- ============================================================
+local TWO_PI = 2 * math.pi
+local function gauss()
+    return math.sqrt(-2 * math.log(math.max(1e-12, math.random())))
+         * math.cos(TWO_PI * math.random())
+end
+local function gamma(k, th)
+    k = math.max(k, 1.0)
+    local d = k - 1/3; local c = 1/math.sqrt(9*d)
+    while true do
+        local x, v
+        repeat x = gauss(); v = 1+c*x until v > 0
+        v = v*v*v
+        local u = math.max(1e-12, math.random())
+        if u < 1 - 0.0331*x*x*x*x then return d*v*th end
+        if math.log(u) < 0.5*x*x + d*(1-v+math.log(v)) then return d*v*th end
+    end
+end
+
+-- ============================================================
+--  ADAPTIVE LEAD — Thompson sampling over CFG.LeadSet
+--  Tiap burst terprediksi milih satu lead. Hasilnya (parry sukses /
+--  kena damage) dilaporin balik, jadi lead yang paling sering sukses
+--  makin sering dipilih. Statistik diluruhkan pelan biar tetep adaptif.
+-- ============================================================
+local Lead = { a = {}, b = {}, n = 0 }
+for i = 1, #CFG.LeadSet do Lead.a[i] = 1; Lead.b[i] = 1 end
+
+local function betaSample(a, b)
+    local x = gamma(math.max(a, 1), 1)
+    local y = gamma(math.max(b, 1), 1)
+    return x / (x + y)
+end
+
+function Lead:pick()
+    local best, bi = -1, 1
+    for i = 1, #CFG.LeadSet do
+        local s = betaSample(self.a[i], self.b[i])
+        if s > best then best, bi = s, i end
+    end
+    return bi, CFG.LeadSet[bi]
+end
+
+function Lead:report(i, ok)
+    if not i or not self.a[i] then return end
+    for j = 1, #CFG.LeadSet do
+        self.a[j] = 1 + (self.a[j] - 1) * 0.985
+        self.b[j] = 1 + (self.b[j] - 1) * 0.985
+    end
+    if ok then self.a[i] = self.a[i] + 1 else self.b[i] = self.b[i] + 1 end
+    self.n = self.n + 1
+end
+
+-- ============================================================
+--  RATE LIMITER — floor/ceil dari CFG, probe every 14s
+-- ============================================================
+local DynRL = { floor=CFG.RateFloor, ceil=CFG.RateCeil, cur=CFG.RateStart, probeT=0, pCd=14, hit=false, hb=false }
+function DynRL:probe()
+    local now = os.clock()
+    if now - self.probeT < self.pCd then return end
+    self.probeT = now
+    if self.hb then self.cur=math.max(self.floor, self.cur-2); self.hb=false
+    elseif self.hit then self.cur=math.max(self.floor, self.cur-1); self.hb=true
+    else self.cur=math.min(self.ceil, self.cur+1) end
+    self.hit = false
+end
+function DynRL:cap() self:probe(); return self.cur end
+
+local RL = { t={} }
+function RL:ok()
+    local now=os.clock(); local f={}
+    for _,x in ipairs(self.t) do if now-x<1 then f[#f+1]=x end end
+    self.t=f
+    local c=DynRL:cap(); if #self.t>=c then DynRL.hit=true end
+    return #self.t < c
+end
+function RL:mark() self.t[#self.t+1]=os.clock() end
+function RL:n() return #self.t end
+
+-- ============================================================
+--  KEYWORDS
+-- ============================================================
+local SELF_ATKS = {"IsPunching","IsHeavyPunching","IsHitRunning","IsKickCombo","IsFiring","IsActionLocked","IsStartingBattle"}
+local ALL_ATTR  = {"IsPunching","IsHeavyPunching","IsHitRunning","IsKickCombo","IsFiring","IsStartingBattle","FightMode"}
+local ATK_ATTR  = {"IsPunching","IsHeavyPunching","IsHitRunning","IsKickCombo","IsFiring"}
+local M2_ATTR   = {IsHeavyPunching=true, IsFiring=true}
+local KO_ATTRS  = {"IsKO","IsBeingCarried","IsBeingFinished","IsWakingUp"}
+
+local M2_KW = {}
+for _,k in ipairs({"heavy","heavypunch","heavyfirst","heavysecond","heavythird","heavyend","heavyspam","fire","spam","kickcombo","hitrun","kick","launch","slam","smash","charge","unblockable","break","burst"}) do M2_KW[k]=true end
+local M1_KW = {"light","lightpunch","punch","m1","combo","attack","swing","strike","jab","hit"}
+
+local function isM2(n) n=n:lower(); for k in pairs(M2_KW) do if n:find(k,1,true) then return true end end return false end
+local function isM1(n) n=n:lower(); for _,k in ipairs(M1_KW) do if n:find(k,1,true) then return true end end return false end
+local function isHeavyAttr(a) return M2_ATTR[a]==true end
+
+-- v11.2: reaction / non-attack animations (so "gethit" etc. never count as an attack)
+local REACT_KW = {"react","hurt","stun","block","knock","ragdoll","getup","flinch","gethit","damage","parried","dizzy"}
+local function isReactAnim(n)
+    n = n:lower()
+    for _,k in ipairs(REACT_KW) do if n:find(k,1,true) then return true end end
+    return false
+end
+
+-- v11.2: any non-looping Action-priority animation counts as an attack,
+-- even if its name matches none of the keywords
+local ACT_PRI = {
+    [Enum.AnimationPriority.Action]  = true,
+    [Enum.AnimationPriority.Action2] = true,
+    [Enum.AnimationPriority.Action3] = true,
+    [Enum.AnimationPriority.Action4] = true,
+}
+
+-- ============================================================
+--  LEARNED HIT DELAY (per animation name)
+--  HD[name] = {d = ema of (hit time - anim start), n = samples}
+--  Fed by: my HP drops (failed/no parry) and ParryFX (success).
+-- ============================================================
+local HD = {}
+local _dirty = false
+local function LearnDelay(name, obs)
+    if not name or not obs or obs < 0.03 or obs > 0.90 then return end
+    local e = HD[name]
+    if not e then
+        HD[name] = {d = obs, n = 1}
+    else
+        if e.n >= 3 and math.abs(obs - e.d) > 0.22 then return end -- outlier (combo chain etc.)
+        if e.n < 3 and math.abs(obs - e.d) > 0.40 then return end
+        local w = (e.n < 3) and 0.50 or 0.35
+        e.d = e.d * (1 - w) + obs * w
+        e.n = math.min(e.n + 1, 50)
+    end
+    _dirty = true
+end
+
+-- ============================================================
+--  PERSISTENCE — hit-delay + statistik lead disimpen ke file
+-- ============================================================
+local _saveT = 0
+local function HDLoad()
+    if not (readfile and isfile) then return end
+    local ok, data = pcall(function()
+        if not isfile(CFG.SaveFile) then return nil end
+        return HttpService:JSONDecode(readfile(CFG.SaveFile))
+    end)
+    if not ok or type(data) ~= "table" then return end
+    if type(data.hd) == "table" then
+        for name, e in pairs(data.hd) do
+            if type(name) == "string" and type(e) == "table" and tonumber(e.d) and tonumber(e.n) then
+                HD[name] = { d = tonumber(e.d), n = math.clamp(math.floor(tonumber(e.n)), 1, 50) }
+            end
+        end
+    end
+    local L = data.lead
+    if type(L) == "table" and type(L.a) == "table" and type(L.b) == "table"
+       and #L.a == #CFG.LeadSet and #L.b == #CFG.LeadSet then
+        for i = 1, #CFG.LeadSet do
+            Lead.a[i] = math.max(1, tonumber(L.a[i]) or 1)
+            Lead.b[i] = math.max(1, tonumber(L.b[i]) or 1)
+        end
+        Lead.n = tonumber(L.n) or 0
+    end
+end
+local function HDSave(force)
+    if not writefile or not _dirty then return end
+    local now = os.clock()
+    if not force and now - _saveT < 20 then return end
+    _saveT = now; _dirty = false
+    pcall(function()
+        writefile(CFG.SaveFile, HttpService:JSONEncode({ hd = HD, lead = { a = Lead.a, b = Lead.b, n = Lead.n } }))
+    end)
+end
+HDLoad()
+
+-- ============================================================
+--  CHAR
+-- ============================================================
+local MC = {char=nil, hum=nil, root=nil}
+local function RefreshChar()
+    local c=LP.Character; if not c then MC.char=nil;MC.hum=nil;MC.root=nil;return false end
+    MC.char=c; MC.hum=c:FindFirstChildWhichIsA("Humanoid"); MC.root=c:FindFirstChild("HumanoidRootPart")
+    return MC.root~=nil
+end
+LP.CharacterAdded:Connect(function(c)
+    MC.char=c; MC.hum=c:WaitForChild("Humanoid"); MC.root=c:WaitForChild("HumanoidRootPart")
+end)
+
+-- ============================================================
+--  PER-PLAYER STATE
+-- ============================================================
+local PS = {}
+local function GPS(uid)
+    if not PS[uid] then PS[uid]={
+        prevVel=Vector3.zero, heavyAlert=false, heavyAlertExp=0,
+        combo=0, lastHitT=0, history={}, avgIv=nil,
+        lastAnimFire={}, lastVelSpike=0, watched=false,
+        sc=0, scHvy=false, scT=0,
+        m2Det=false, m2DetExp=0,
+        kPos=nil, kVel=Vector3.zero, kT=0,
+        lastFireT=0, missStreak=0,
+        preArmActive=false, preArmExp=0,
+        atkT=0,            -- last attack evidence (anim / attr / FX)
+        animName=nil, animT=0, animHit=false,  -- last attack animation + whether its hit was already learned
+    } end
+    return PS[uid]
+end
+Players.PlayerRemoving:Connect(function(p) PS[p.UserId]=nil end)
+
+-- ============================================================
+--  RAGDOLL — property signal + 55ms poll fallback
+-- ============================================================
+local RDL = {on=false, t=0}
+local function SetRDL(v)
+    if v and not RDL.on then RDL.on=true; RDL.t=os.clock()
+    elseif not v then RDL.on=false end
+end
+local _rdlT=0
+local function PollRDL()
+    local now=os.clock(); if now-_rdlT<0.055 then return end; _rdlT=now
+    local r=MC.root; if not r then SetRDL(false); return end
+    local v=r.Velocity; local c=MC.char
+    local held=c and (c:GetAttribute("IsBeingCarried")==true or c:GetAttribute("IsBeingFinished")==true)
+    SetRDL(v.Y < -5 or v.Y > 7 or Vector3.new(v.X,0,v.Z).Magnitude > 20 or held)
+end
+
+-- ============================================================
+--  FIRE QUEUE — priority sorted
+-- ============================================================
+local FQ = {q={}, last=0, gap=0.016}
+local PRI = {prearm=6, ragdoll=5, instant=4, reactive=3, combo=3, normal=2, idle=1}
+
+function FQ:push(urg, heavy, track, name, t0)
+    local now=os.clock()
+    for _,e in ipairs(self.q) do
+        if e.urg==urg and now-e.t < 0.022 then return end
+    end
+    self.q[#self.q+1]={urg=urg, heavy=heavy, track=track, name=name, t0=t0, t=now, pri=PRI[urg] or 1}
+    table.sort(self.q, function(a,b) return a.pri>b.pri end)
+end
+
+function FQ:pop()
+    local now=os.clock(); local f={}
+    for _,e in ipairs(self.q) do
+        local ttl=(e.urg=="prearm") and 0.080 or 0.170
+        if now-e.t < ttl then f[#f+1]=e end
+    end
+    self.q=f
+    if #self.q==0 then return nil end
+    local e=self.q[1]; table.remove(self.q,1); return e
+end
+
+-- ============================================================
+--  PARRY STATE
+-- ============================================================
+local Parry = {
+    on=false, nextFire=0, firing=false, fireAt=0,
+    parryN=0, missN=0, consecMiss=0, dynThr=3.0, missStreak=0,
+    reactMode=false, preArmExp=0,
+}
+
+-- ============================================================
+--  OUTCOME TRACKING — feeds the adaptive lead
+--  Pending = burst terprediksi yang nunggu hasil (ParryFX / HP drop)
+-- ============================================================
+local Pend, Stat, _lastFailT = {}, {ok=0, fail=0}, 0
+local function PendAdd(i, H, name) Pend[#Pend+1] = {i=i, H=H, name=name} end
+local function PendFor(name, H)
+    for _, p in ipairs(Pend) do
+        if p.name == name and math.abs(p.H - H) < 0.20 then return p end
+    end
+    return nil
+end
+local function PendResolve(ok)
+    local now = os.clock()
+    for k = #Pend, 1, -1 do if now - Pend[k].H > 0.8 then table.remove(Pend, k) end end
+    local bk, bd = nil, 0.50
+    for k, p in ipairs(Pend) do
+        local d = math.abs(now - p.H)
+        if d < bd then bd, bk = d, k end
+    end
+    if not bk then return end
+    local p = table.remove(Pend, bk)
+    Lead:report(p.i, ok)
+    if ok then Stat.ok = Stat.ok + 1 else Stat.fail = Stat.fail + 1 end
+    _dirty = true
+    if Lead.n % 10 == 0 then
+        local bi, bm = 1, -1
+        for i = 1, #CFG.LeadSet do
+            local m = Lead.a[i] / (Lead.a[i] + Lead.b[i])
+            if m > bm then bm, bi = m, i end
+        end
+        print(string.format("[WRAITH] %d hasil | sukses %d / gagal %d | lead terbaik %.2fs (%.0f%%)",
+            Lead.n, Stat.ok, Stat.fail, CFG.LeadSet[bi], bm * 100))
+    end
+end
+local function PendFail()
+    local now = os.clock()
+    if now - _lastFailT < 0.15 then return end
+    _lastFailT = now
+    PendResolve(false)
+end
+
+-- ============================================================
+--  LOCK CONFIG
+-- ============================================================
+local LCFG = {
+    Range=26, Leash=34, Dur=80,
+    SwCd=0.40, Pred=0.14,
+    Resp=140, MaxTorque=1e6, ProxR=14,
+    HitRange=22,   -- v11.2: max distance to attribute a hit to a player
+}
+
+-- ============================================================
+--  LOCK STATE — TRUE NEUTRAL
+--  Lock.target is ONLY set inside LockOn().
+--  LockOn() ONLY runs from CL:onIncoming / CL:onOutgoing,
+--  which are ONLY called with a verified player after a real
+--  HP drop (mine = hit-in, theirs = hit-out).
+-- ============================================================
+local Lock = {
+    on=false, target=nil, expT=0,
+    combatT=0, inCombat=false,
+    alignOri=nil, att0=nil,
+    prevPos=nil, vel=Vector3.zero, velT=0,
+    lastSw=0, lastProx=0, isAtk=false,
+    lastAtk=nil, lastAtkT=0,
+    lastHitTgt=nil, lastHitTgtT=0,
+}
+local EXCHANGE_TTL = 8.0   -- v13.1: dulu 1.4 (lock bertahan ~TTL+0.3 detik setelah baku hantam terakhir)
+
+-- own swing timestamp (a swing alone does NOT lock; a landed hit does)
+local lastSelfAtkT = 0
+local function MarkSwing() lastSelfAtkT = os.clock() end
+
+local CL = {active=false, lastT=0, count=0}
+
+local LockOn, UnlockTarget, FullOff, GetBest
+
+-- ============================================================
+--  COMBAT LOCK METHODS — need a VERIFIED player, else nothing
+-- ============================================================
+function CL:onIncoming(t)
+    if not t then return end
+    self.lastT  = os.clock()
+    self.active = true
+    self.count  = self.count + 1
+    if not Lock.on then return end
+    Lock.lastAtk = t; Lock.lastAtkT = os.clock()
+    LockOn(t)
+end
+
+function CL:onOutgoing(t)
+    if not t then return end
+    self.lastT  = os.clock()
+    self.active = true
+    self.count  = self.count + 1
+    if not Lock.on then return end
+    Lock.lastHitTgt = t; Lock.lastHitTgtT = os.clock()
+    LockOn(t)
+end
+
+function CL:tick()
+    if not self.active then return end
+    if os.clock() - self.lastT > EXCHANGE_TTL then
+        self.active = false; self.count = 0
+        if Lock.on and Lock.target then UnlockTarget() end
+    end
+end
+
+-- ============================================================
+--  HELPERS
+-- ============================================================
+local function Dist(a,b) if not a or not b then return 9999 end return (a.Position-b.Position).Magnitude end
+local function IsSelfAtk()
+    if CFG.ParryWhileSwinging then return false end
+    local c=MC.char; local h=MC.hum; if not c then return false end
+    for _,a in ipairs(SELF_ATKS) do
+        if c:GetAttribute(a)==true then return true end
+        if h and h:GetAttribute(a)==true then return true end
+    end return false
+end
+local function IsHardKO()
+    local c=MC.char; if not c then return true end
+    return c:GetAttribute("IsKO")==true
+end
+local function FromBack(er)
+    local root=MC.root; if not root or not er then return false end
+    local toE=Vector3.new(er.Position.X-root.Position.X,0,er.Position.Z-root.Position.Z)
+    if toE.Magnitude<0.1 then return false end
+    local lk=root.CFrame.LookVector; lk=Vector3.new(lk.X,0,lk.Z)
+    if lk.Magnitude<0.1 then return false end
+    return lk.Unit:Dot(toE.Unit) < -0.10
+end
+local function ScanAttrs(char,eh)
+    for _,a in ipairs(ALL_ATTR) do
+        local v=char:GetAttribute(a)
+        if v==true then return true,isHeavyAttr(a),a end
+        if type(v)=="string" and (v:lower():find("attack") or v:lower():find("heavy")) then return true,isHeavyAttr(a),a end
+        if eh then v=eh:GetAttribute(a); if v==true then return true,isHeavyAttr(a),a end end
+    end return false,false,nil
+end
+local function MarkCombat() Lock.combatT=os.clock(); Lock.inCombat=true end
+
+-- ============================================================
+--  FIND ATTACKER — STRICT. Returns nil if nobody was really attacking.
+--  Needs: attack evidence within window, in HitRange, facing me.
+--  NO nearest-player fallback.
+-- ============================================================
+local function FindAttacker()
+    local root = MC.root; if not root then return nil end
+    local now = os.clock()
+    local win = 0.85 + GetPing() / 1000
+    local best, bestS = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local c  = p.Character
+            local er = c and c:FindFirstChild("HumanoidRootPart")
+            local eh = c and c:FindFirstChildWhichIsA("Humanoid")
+            if er and eh and eh.Health > 0 then
+                local toMe = root.Position - er.Position
+                local d = toMe.Magnitude
+                local age = now - (GPS(p.UserId).atkT or 0)
+                if d <= LCFG.HitRange and age <= win then
+                    local facing = d < 0.1 or er.CFrame.LookVector:Dot(toMe.Unit) > -0.2
+                    if facing then
+                        local s = age + d * 0.01
+                        if s < bestS then bestS, best = s, p end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- v12: learn an animation's hit delay from OTHER players getting hit
+local function LearnFromVictim(vp, vc)
+    local vr = vc and vc:FindFirstChild("HumanoidRootPart")
+    if not vr or not MC.root then return end
+    if (vr.Position - MC.root.Position).Magnitude > 60 then return end
+    local now = os.clock()
+    if now - lastSelfAtkT < 0.60 then return end          -- itu hit-ku sendiri
+    local best, bestAge = nil, 0.90
+    for _, ap in ipairs(Players:GetPlayers()) do
+        if ap ~= vp and ap ~= LP then
+            local aps = PS[ap.UserId]
+            local ar  = ap.Character and ap.Character:FindFirstChild("HumanoidRootPart")
+            if aps and aps.animName and not aps.animHit and ar then
+                local age = now - aps.animT
+                local toV = vr.Position - ar.Position
+                if age > 0.04 and age < bestAge and toV.Magnitude <= LCFG.HitRange and toV.Magnitude > 0.1
+                   and ar.CFrame.LookVector:Dot(toV.Unit) > 0.35 then
+                    best, bestAge = aps, age
+                end
+            end
+        end
+    end
+    if best then best.animHit = true; LearnDelay(best.animName, bestAge) end
+end
+
+-- does this player look like they're attacking right now? (parry gate)
+local function HasEvidence(p, ps, now)
+    local ec = p.Character; if not ec then return false end
+    local er = ec:FindFirstChild("HumanoidRootPart")
+    if not er or not MC.root then return false end
+    if Dist(MC.root, er) > LCFG.Range then return false end
+    if now - (ps.atkT or 0) < 0.40 then return true end
+    local eh = ec:FindFirstChildWhichIsA("Humanoid")
+    for _, a in ipairs(ATK_ATTR) do
+        if ec:GetAttribute(a) == true then return true end
+        if eh and eh:GetAttribute(a) == true then return true end
+    end
+    return false
+end
+
+-- ============================================================
+--  SCORE — 2ms cache
+-- ============================================================
+local function Score(p, ps)
+    local now=os.clock()
+    if now-ps.scT < 0.002 then return ps.sc, ps.scHvy end
+    local ec=p.Character; local root=MC.root
+    if not ec or not root then ps.sc=0; return 0,false end
+    local er=ec:FindFirstChild("HumanoidRootPart")
+    local eh=ec:FindFirstChildWhichIsA("Humanoid")
+    if not er or not eh or eh.Health<=0 then ps.sc=0; return 0,false end
+    local d=Dist(root,er)
+    if d>26 or FromBack(er) then ps.sc=0; return 0,false end
+
+    local sc=0; local hvy=false
+    sc = sc + math.floor((1-d/26)*28)
+    local ha,hA=ScanAttrs(ec,eh)
+    if hA then sc=sc+130;hvy=true elseif ha then sc=sc+85 end
+    if ec:GetAttribute("InCombat")==true then sc=sc+18 end
+    if ec:GetAttribute("FightMode")==true then sc=sc+15 end
+
+    local anim=eh:FindFirstChildOfClass("Animator")
+    if anim then
+        local ok,tracks=pcall(function() return anim:GetPlayingAnimationTracks() end)
+        if ok and tracks then
+            for _,t in pairs(tracks) do
+                if t and t.IsPlaying then
+                    local n=t.Animation.Name; local pos=t.TimePosition
+                    if isM2(n) then hvy=true; sc=sc+(pos<=0.02 and 110 or pos<=0.05 and 98 or pos<0.15 and 80 or 60); break
+                    elseif isM1(n) then sc=sc+(pos<=0.02 and 96 or pos<=0.04 and 80 or pos<0.12 and 64 or 44); break end
+                end
+            end
+        end
+    end
+
+    if ps.heavyAlert and now<ps.heavyAlertExp then sc=sc+58;hvy=true end
+    if ps.combo>0 then sc=sc+math.min(ps.combo*28,140) end
+    local avg=ps.avgIv; if avg and avg<0.45 then sc=sc+math.floor((1-avg/0.45)*40) end
+    if ps.m2Det and now<ps.m2DetExp then sc=sc+40;hvy=true end
+    if ps.missStreak>=2 then sc=sc-math.min(ps.missStreak*22,88) end
+    if Lock.lastAtk==p and now-Lock.lastAtkT<10 then sc=sc+36 end
+    if Lock.lastHitTgt==p and now-Lock.lastHitTgtT<10 then sc=sc+26 end
+    if ps.preArmActive and now<ps.preArmExp then sc=sc+45;hvy=true end
+
+    local vel=er.Velocity; local acc=(vel-ps.prevVel).Magnitude; ps.prevVel=vel
+    if acc>=3.5 then
+        local toMe=root.Position-er.Position
+        if toMe.Magnitude>0.1 and vel.Magnitude>0.1 then
+            local dot=toMe.Unit:Dot(vel.Unit)
+            if dot>0.12 then sc=sc+math.floor(dot*52) end
+        end
+    end
+
+    local hpR=eh.Health/math.max(eh.MaxHealth,1)
+    if hpR<0.28 then sc=sc+26 elseif hpR<0.52 then sc=sc+13 end
+
+    ps.sc=math.min(sc,380); ps.scHvy=hvy; ps.scT=now
+    return ps.sc, ps.scHvy
+end
+
+-- ============================================================
+--  DECOY
+-- ============================================================
+local Decoy={nt=0,ns=0}
+function Decoy:sch() self.nt=os.clock()+gamma(2.5,4.5)+6 end
+function Decoy:schS() self.ns=os.clock()+gamma(3,5)+10 end
+function Decoy:tick()
+    local now=os.clock()
+    if now>=self.nt and RL:ok() then
+        pcall(function() task.delay(0.04+math.random()*0.10,function() if RL:ok() then RequestBlock:FireServer(false);RL:mark() end end) end)
+        self:sch()
+    end
+    if now>=self.ns and RL:ok() then
+        pcall(function() task.spawn(function()
+            task.wait(ReactDelay(false,"normal"))
+            if not RL:ok() then return end
+            RequestBlock:FireServer(true);RL:mark()
+            task.wait(TapDuration("normal"))
+            if RL:ok() then RequestBlock:FireServer(false);RL:mark() end
+        end) end)
+        self:schS()
+    end
+end
+Decoy:sch(); Decoy:schS()
+
+-- ============================================================
+--  HOLD MANAGER (v13)
+--  Satu block ditahan selama jendela hit, bukan tap-lepas-tap.
+--  win = daftar {s=mulai, e=selesai} (os.clock). Loop per-frame
+--  nahan/refresh block selama ada jendela aktif, lepas kalau habis.
+-- ============================================================
+local Hold = { win = {}, loop = false, down = false, lastTrue = 0, sent = 0, lastSent = 0, hist = {}, parryT = 0 }
+
+local function HoldRelease()
+    if not Hold.down then return end
+    Hold.down = false
+    Hold.lastSent = Hold.sent; Hold.sent = 0
+    pcall(function() RequestBlock:FireServer(false) end)
+end
+
+local function HoldInterval()
+    local cap = math.max(DynRL:cap(), 4)
+    return math.max(0.040, 1 / (cap * 0.85))
+end
+
+local function HoldActive(now, gv)
+    local act = false
+    for k = #Hold.win, 1, -1 do
+        local w = Hold.win[k]
+        if now >= w.e or (w.u and CFG.EcoSkipLow and gv < CFG.EcoGuardLow) then
+            table.remove(Hold.win, k)
+        elseif now >= w.s then
+            act = true
+        end
+    end
+    return act
+end
+
+local function HoldSend()
+    if CFG.RefreshMode == "cycle" and Hold.down then
+        pcall(function()
+            RequestBlock:FireServer(false)
+            RequestBlock:FireServer(true)
+        end)
+        RL:mark(); RL:mark()
+    else
+        pcall(function() RequestBlock:FireServer(true) end)
+        RL:mark()
+    end
+    local t = os.clock()
+    Hold.lastTrue = t
+    Hold.down = true
+    Hold.sent = Hold.sent + 1
+    for _, w in ipairs(Hold.win) do
+        if t >= w.s then w.n = (w.n or 0) + 1 end
+    end
+end
+
+-- true kalau perlu kirim: belum ada block turun, atau ada jendela aktif yang
+-- jatah refresh-nya (RefreshMax) belum habis
+local function HoldWants(now)
+    if not Hold.down then return true end
+    for _, w in ipairs(Hold.win) do
+        local cap = (w.h and CFG.PredRefresh or CFG.RefreshMax) + 1
+        if now >= w.s and now < w.e and (w.n or 0) < cap then return true end
+    end
+    return false
+end
+
+local function HoldLoop()
+    if Hold.loop then return end
+    Hold.loop = true
+    task.spawn(function()
+        while #Hold.win > 0 do
+            if not (Parry.on or Parry.reactMode or RDL.on) then
+                Hold.win = {}
+                break
+            end
+            local now = os.clock()
+            local char = LP.Character
+            local gv = char and char:GetAttribute("GuardValue")
+            if typeof(gv) ~= "number" then gv = 1 end
+            local act = HoldActive(now, gv)
+            local broken = char and char:GetAttribute("GuardBroken") == true
+            if act and not broken then
+                local gap = 0
+                if Hold.down then gap = CFG.HoldRefresh and HoldInterval() or 9e9 end
+                if now - Hold.lastTrue >= gap and HoldWants(now) and RL:ok() then
+                    HoldSend()
+                end
+            elseif Hold.down and #Hold.win > 0 and not act then
+                -- jeda antar dua jendela: lepas kalau jendela berikutnya masih jauh
+                local nextS = math.huge
+                for _, w in ipairs(Hold.win) do
+                    if w.s < nextS then nextS = w.s end
+                end
+                if nextS - now > 0.20 then HoldRelease() end
+            end
+            task.wait()
+        end
+        HoldRelease()
+        Hold.loop = false
+    end)
+end
+
+local function HoldRequest(s, e, unk, hit)
+    -- gabung ke jendela yang udah ada kalau itu hit/animasi yang sama
+    for _, w in ipairs(Hold.win) do
+        if hit and w.h then
+            if math.abs(w.h - hit) < 0.05 then          -- hit yang sama, diminta ulang
+                w.s = math.min(w.s, s); w.e = math.max(w.e, e)
+                return
+            end
+        elseif (not hit) and (not w.h) and w.u == unk and s <= w.e and e >= w.s then
+            w.s = math.min(w.s, s); w.e = math.max(w.e, e)   -- jendela tanpa timing yang overlap
+            return
+        end
+    end
+    Hold.win[#Hold.win + 1] = { s = s, e = e, u = unk, h = hit }
+    HoldLoop()
+end
+
+-- parry sukses: buang jendela yang lagi aktif/sudah mulai, sisakan yang di masa depan
+local function HoldParried()
+    local now = os.clock()
+    Hold.parryT = now
+    for k = #Hold.win, 1, -1 do
+        if Hold.win[k].s <= now + 0.05 then table.remove(Hold.win, k) end
+    end
+end
+
+-- ============================================================
+--  ATTACK TAG (v13.4) — catatan request parry terakhir buat guard log
+-- ============================================================
+local function HoldNote(name, heavy, urg, pred)
+    local h = Hold.hist
+    local nm = name or ("(" .. tostring(urg) .. ")")
+    local last = h[#h]
+    if last and last.n == nm and os.clock() - last.t < 0.25 then return end
+    h[#h + 1] = { t = os.clock(), n = nm, H = heavy, p = pred }
+    if #h > 8 then table.remove(h, 1) end
+end
+
+local function AtkTag()
+    local now = os.clock()
+    local out = {}
+    for i = #Hold.hist, 1, -1 do
+        local r = Hold.hist[i]
+        local age = now - r.t
+        if age > 1.0 or #out >= 3 then break end
+        out[#out + 1] = string.format("%s|%s|%s|%.2fs",
+            string.sub(tostring(r.n), 1, 24), r.H and "H" or "L", r.p and "pred" or "unk", age)
+    end
+    if #out == 0 then return "-" end
+    return table.concat(out, " ; ")
+end
+
+-- ============================================================
+--  GUARD LOG (v13.2) — print tiap GuardValue turun
+-- ============================================================
+local function GuardLogHook(char)
+    if not CFG.GuardLog or not char then return end
+    local last = char:GetAttribute("GuardValue")
+    if typeof(last) ~= "number" then last = 1 end
+    char:GetAttributeChangedSignal("GuardValue"):Connect(function()
+        local v = char:GetAttribute("GuardValue")
+        if typeof(v) ~= "number" then return end
+        if v < last - 0.005 then
+            local t0, from, to = os.clock(), last, v
+            local hold, sent, prev, win, atk = Hold.down, Hold.sent, Hold.lastSent, #Hold.win, AtkTag()
+            task.delay(0.15, function()
+                local kind = (math.abs(Hold.parryT - t0) <= 0.15) and "parry" or "other"
+                print(string.format("[GUARD] %.2f -> %.2f (-%.2f) %s | hold=%s sends=%d prev=%d win=%d | atk=%s",
+                    from, to, from - to, kind, tostring(hold), sent, prev, win, atk))
+            end)
+        end
+        last = v
+    end)
+end
+GuardLogHook(LP.Character)
+LP.CharacterAdded:Connect(GuardLogHook)
+
+-- ============================================================
+--  SPAM LOCK (dipertahankan buat kompatibilitas; DoBurst gak pakai lagi)
+-- ============================================================
+local spamLock=false; local spamLockT=0
+local function ClearSL() spamLock=false; spamLockT=0 end
+
+-- ============================================================
+--  DO BURST (v13) — jadwalin jendela hold
+--  Prediksi ada (hit-delay udah dipelajari):
+--      mulai  = animStart + hitDelay - RTT - lead(Thompson)
+--      selesai = animStart + hitDelay + HoldTail
+--  Belum ada: mulai sekarang, tahan HoldUnknown/HoldHeavy/HoldRagdoll.
+-- ============================================================
+local function DoBurst(heavy, urg, track, ovr, name, t0)
+    local isRDL = RDL.on or urg == "ragdoll"
+    local now   = os.clock()
+    local hd    = name and HD[name]
+    local predicted = (not isRDL and hd and hd.n >= CFG.MinSamples and t0) and (t0 + hd.d) or nil
+    HoldNote(name, heavy, urg, predicted ~= nil)
+
+    local s, e
+    if predicted then
+        local leadV = 0.04
+        local pend = PendFor(name, predicted)
+        if pend then
+            leadV = CFG.LeadSet[pend.i] or leadV
+        else
+            local li, lv = Lead:pick()
+            leadV = lv
+            PendAdd(li, predicted, name)
+        end
+        s = predicted - GetPing() / 1000 - leadV
+        e = predicted + CFG.HoldTail
+        Parry.nextFire = math.max(Parry.nextFire, now + CFG.RefireGap)
+    else
+        if not isRDL and CFG.EcoSkipLow then
+            local ch = LP.Character
+            local gv = ch and ch:GetAttribute("GuardValue")
+            if typeof(gv) == "number" and gv < CFG.EcoGuardLow then
+                ClearSL()
+                return
+            end
+        end
+        local dur = isRDL and CFG.HoldRagdoll or (heavy and CFG.HoldHeavy or CFG.HoldUnknown)
+        s = now + 0.004
+        e = s + dur
+    end
+
+    HoldRequest(math.max(s, now + 0.002), math.max(e, now + 0.05), (not predicted) and (not isRDL), predicted)
+    if isRDL then task.delay(0.065, ClearSL) else ClearSL() end
+end
+
+-- ============================================================
+--  CAN FIRE / FIRE PARRY
+-- ============================================================
+local function CanFire(ps, urg)
+    local rdl=RDL.on
+    if urg=="prearm" or urg=="ragdoll" or rdl then return not IsHardKO() end
+    if urg=="instant" then
+        if IsHardKO() then return false end
+        return not spamLock or (os.clock()-spamLockT>0.32)
+    end
+    if urg=="reactive" then return MC.root~=nil and not IsSelfAtk() end
+    if not Parry.on then return false end
+    if Parry.firing and os.clock()-Parry.fireAt<CFG.RefireGap then return false end
+    if os.clock()<Parry.nextFire then return false end
+    if not MC.root then return false end
+    if IsSelfAtk() then return false end
+    if ps and os.clock()-ps.lastFireT<0.060 then return false end
+    return true
+end
+
+local function FireParry(heavy, ps, urg, track, name, t0)
+    local rdl=RDL.on or urg=="ragdoll"
+    local fast=rdl or urg=="prearm"
+    if fast then Parry.firing=false;Parry.fireAt=0;Parry.nextFire=0;spamLock=false;spamLockT=0 end
+    if not fast and not CanFire(ps,urg) then return false end
+    local cd=BurstCD(heavy)
+    if urg~="reactive" and not fast then
+        Parry.firing=true; Parry.fireAt=os.clock()
+        Parry.nextFire=os.clock()+cd+gamma(1.2,0.004)
+    end
+    if ps then ps.lastFireT=os.clock() end
+    local u=rdl and "ragdoll" or (urg or "normal")
+    task.spawn(function()
+        DoBurst(heavy, u, track, nil, name, t0)
+        if urg~="reactive" and not rdl then task.wait(0.20); Parry.firing=false end
+    end)
+    return true
+end
+
+-- ============================================================
+--  QUEUE CONSUMER
+-- ============================================================
+local _qcT=0
+local function ConsumeQ()
+    local now=os.clock(); if now-_qcT<FQ.gap then return end; _qcT=now
+    local e=FQ:pop(); if not e then return end
+    FireParry(e.heavy, nil, e.urg, e.track, e.name, e.t0)
+end
+
+-- ============================================================
+--  COMBO / HISTORY
+-- ============================================================
+local function RecordHit(ps, heavy, src)
+    local now=os.clock()
+    ps.history[#ps.history+1]={t=now,h=heavy,s=src}
+    if #ps.history>32 then table.remove(ps.history,1) end
+    ps.lastHitT=now
+    if #ps.history>=3 then
+        local s,n=0,0
+        for i=2,#ps.history do s=s+ps.history[i].t-ps.history[i-1].t;n=n+1 end
+        ps.avgIv=s/n
+    else ps.avgIv=nil end
+end
+local function UpdateCombo(ps,uid,heavy,src)
+    if os.clock()-ps.lastHitT>1.5 then ps.combo=0 end
+    RecordHit(ps,heavy,src); ps.combo=ps.combo+1; return ps.combo
+end
+local function UpdateThr(missed,ps)
+    Parry.dynThr=Parry.dynThr*0.80+(missed and 3 or 8)*0.20
+    Parry.dynThr=math.clamp(Parry.dynThr,3,10)
+    if missed then
+        Parry.consecMiss=Parry.consecMiss+1; Parry.missStreak=Parry.missStreak+1
+        if ps then ps.missStreak=(ps.missStreak or 0)+1 end
+        if Parry.consecMiss>=3 then ClearSL();Parry.consecMiss=0;Parry.missStreak=0;Parry.nextFire=0 end
+    else Parry.consecMiss=0;Parry.missStreak=0; if ps then ps.missStreak=0 end end
+end
+
+-- ============================================================
+--  PRE-ARM TRIGGER
+-- ============================================================
+local function TryPreArm(ps, uid, animName, heavy, t0)
+    if not heavy and not isM1(animName) then return end
+    local now=os.clock()
+    if ps.preArmActive and now<ps.preArmExp then return end
+    ps.preArmActive=true; ps.preArmExp=now+0.55
+    FQ:push(heavy and "prearm" or "instant", heavy, nil, animName, t0)
+end
+
+-- ============================================================
+--  HEARTBEAT — parry scan (never touches the lock)
+--  v11.2: only players with attack evidence are considered
+-- ============================================================
+local _hbT=0
+RunService.Heartbeat:Connect(function()
+    CL:tick(); MaybeRotate(); PollRDL()
+    if Parry.on or Parry.reactMode or RDL.on then ConsumeQ() end
+    local parryOn=Parry.on or Parry.reactMode
+    if not parryOn then Decoy:tick(); return end
+    local rdl=RDL.on
+    if not rdl and not MC.root then RefreshChar(); return end
+    if not rdl and IsSelfAtk() then return end
+    local now=os.clock()
+    local sr=rdl and 0.001 or math.max(0.002, FPS.ft*0.80)
+    if now-_hbT<sr then return end; _hbT=now
+
+    if not Parry.on then return end
+    if not rdl and now<Parry.nextFire then return end
+
+    local q={}
+    for _,p in pairs(Players:GetPlayers()) do
+        if p~=LP then
+            local ps2=GPS(p.UserId)
+            if HasEvidence(p, ps2, now) then
+                local sc,hv=Score(p,ps2)
+                if sc>=Parry.dynThr then q[#q+1]={p=p,sc=sc,hv=hv,ps=ps2} end
+            end
+        end
+    end
+    table.sort(q,function(a,b) return a.sc>b.sc end)
+
+    if #q>0 then
+        local top=q[1]; local ps2=top.ps; local uid=top.p.UserId
+        if top.hv then ps2.heavyAlert=true; ps2.heavyAlertExp=now+4.0 end
+        local u=rdl and "ragdoll" or "normal"
+        local nm, t0 = nil, nil
+        if ps2.animName and now-ps2.animT < 0.9 then nm, t0 = ps2.animName, ps2.animT end
+        local fired=FireParry(top.hv, ps2, u, nil, nm, t0)
+        if fired then UpdateCombo(ps2,uid,top.hv,"HB"); UpdateThr(false,ps2) end
+    end
+end)
+
+-- ============================================================
+--  WATCH CHAR — anim + attr listeners
+-- ============================================================
+local function WatchChar(p, char)
+    if not char then return end
+    local eh=char:FindFirstChildWhichIsA("Humanoid")
+    local uid=p.UserId; local ps=GPS(uid)
+
+    local function watchAnim(anim)
+        pcall(function()
+            anim.AnimationPlayed:Connect(function(track)
+                if not track then return end
+                local ok,n=pcall(function() return track.Animation.Name end)
+                if not ok or not n then return end
+                if isReactAnim(n) then return end
+                local aid=""
+                pcall(function() aid=tostring(track.Animation.AnimationId):match("%d+") or "" end)
+                local key=(aid~="") and (n.."#"..aid) or n
+                local H=isM2(n); local M=isM1(n)
+                local isAct=false
+                pcall(function() isAct = (ACT_PRI[track.Priority]==true) and (not track.Looped) end)
+                if not H and not M and not isAct then return end
+
+                -- attack evidence (before parry gates, so lock attribution works with parry off)
+                local gps=GPS(uid)
+                local now=os.clock()
+                gps.atkT=now; gps.animName=key; gps.animT=now; gps.animHit=false
+
+                if not (Parry.on or Parry.reactMode) then return end
+                if not RDL.on and IsSelfAtk() then return end
+                local er=char:FindFirstChild("HumanoidRootPart")
+                if not er or not MC.root then return end
+                if Dist(MC.root,er)>26 or FromBack(er) then return end
+                local ck=uid.."_"..n
+                if now-(ps.lastAnimFire[ck] or 0)<0.075 then return end
+                ps.lastAnimFire[ck]=now
+
+                UpdateCombo(ps,uid,H,n)
+                if H then ps.heavyAlert=true; ps.heavyAlertExp=now+4.0 end
+
+                -- learned timing available -> single timed burst
+                local hd=HD[key]
+                if hd and hd.n>=CFG.MinSamples then
+                    FQ:push(RDL.on and "ragdoll" or "prearm", H, track, key, now)
+                    return
+                end
+
+                -- default path (no timing data yet)
+                if track.TimePosition<=0.020 then TryPreArm(ps,uid,n,H,now) end
+                if H then
+                    FQ:push(RDL.on and "ragdoll" or "instant", true, nil, key, now)
+                else
+                    FQ:push(RDL.on and "ragdoll" or "normal", false, track, key, now)
+                end
+            end)
+        end)
+    end
+
+    local function onAttr(obj, a)
+        pcall(function()
+            obj:GetAttributeChangedSignal(a):Connect(function()
+                local v=obj:GetAttribute(a)
+                if not (v==true or (type(v)=="string" and (v:lower():find("attack") or v:lower():find("heavy")))) then return end
+                if a~="FightMode" and a~="IsStartingBattle" then GPS(uid).atkT=os.clock() end
+                if not (Parry.on or Parry.reactMode) then return end
+                if not RDL.on and IsSelfAtk() then return end
+                local er=char:FindFirstChild("HumanoidRootPart")
+                if not er or not MC.root then return end
+                if Dist(MC.root,er)>26 or FromBack(er) then return end
+                local hvy=isHeavyAttr(a)
+                local now=os.clock()
+                if now-ps.lastFireT<0.060 then return end
+                if hvy then
+                    ps.heavyAlert=true; ps.heavyAlertExp=now+4.0
+                    ps.preArmActive=true; ps.preArmExp=now+0.55
+                    if not ps.m2Det or now>=ps.m2DetExp then
+                        ps.m2Det=true; ps.m2DetExp=now+2.5
+                        UpdateCombo(ps,uid,true,a)
+                        FQ:push(RDL.on and "ragdoll" or "prearm", true, nil)
+                        return
+                    end
+                end
+                UpdateCombo(ps,uid,hvy,a)
+                FQ:push(RDL.on and "ragdoll" or "normal", hvy, nil)
+            end)
+        end)
+    end
+
+    if eh then
+        local an=eh:FindFirstChildOfClass("Animator")
+        if an then watchAnim(an)
+        else eh.ChildAdded:Connect(function(c) if c:IsA("Animator") then watchAnim(c) end end) end
+    end
+    for _,a in ipairs(ALL_ATTR) do
+        onAttr(char,a); if eh then onAttr(eh,a) end
+    end
+
+    -- HIT-OUT: lock ONLY when this enemy's HP dropped inside my swing window
+    if eh then
+        local ph = eh.Health
+        eh:GetPropertyChangedSignal("Health"):Connect(function()
+            local h = eh.Health
+            local drop = ph - h
+            ph = h
+            if drop < 0.5 then return end
+            if CFG.LearnFromOthers then pcall(LearnFromVictim, p, char) end
+            if os.clock() - lastSelfAtkT > 0.60 + GetPing()/1000 then return end
+            local er = char:FindFirstChild("HumanoidRootPart")
+            if not er or not MC.root then return end
+            if Dist(MC.root, er) > LCFG.HitRange or FromBack(er) then return end
+            CL:onOutgoing(p)
+        end)
+    end
+end
+
+local function Watch(p)
+    if not p or p==LP then return end
+    local ps=GPS(p.UserId); if ps.watched then return end
+    ps.watched=true
+    if p.Character then WatchChar(p,p.Character) end
+    p.CharacterAdded:Connect(function(c)
+        ps.watched=false; PS[p.UserId]=nil
+        task.wait(0.22); Watch(p)
+    end)
+end
+local function WatchAll() for _,p in pairs(Players:GetPlayers()) do Watch(p) end end
+WatchAll()
+Players.PlayerAdded:Connect(function(p) task.wait(0.16); Watch(p) end)
+
+-- ============================================================
+--  FX HOOKS
+--  v11.2: FX events NEVER lock. They only feed parry / evidence.
+-- ============================================================
+if ReactionFX then
+    ReactionFX.OnClientEvent:Connect(function()
+        MarkCombat(); Parry.missN=Parry.missN+1
+        local root=MC.root
+        for _,p in pairs(Players:GetPlayers()) do
+            if p~=LP and p.Character then
+                local er=p.Character:FindFirstChild("HumanoidRootPart")
+                if er and root and Dist(root,er)<=26 and not FromBack(er) then
+                    local ps2=GPS(p.UserId)
+                    UpdateCombo(ps2,p.UserId,false,"RFX"); UpdateThr(true,ps2)
+                end
+            end
+        end
+        if Parry.on then FQ:push("instant",false,nil) else
+            Parry.reactMode=true; Parry.preArmExp=os.clock()+0.40
+            FQ:push("reactive",false,nil)
+            task.delay(0.42,function() Parry.reactMode=false end)
+        end
+    end)
+end
+
+if HeavyPunchFX then
+    HeavyPunchFX.OnClientEvent:Connect(function(atk)
+        MarkCombat()
+        if atk and atk~=LP then
+            local ps2=GPS(atk.UserId)
+            if ps2 then
+                ps2.atkT=os.clock()
+                ps2.heavyAlert=true;ps2.heavyAlertExp=os.clock()+4;ps2.preArmActive=true;ps2.preArmExp=os.clock()+0.55
+            end
+        end
+        if Parry.on then FQ:push("prearm",true,nil) else
+            Parry.reactMode=true
+            FQ:push("reactive",true,nil)
+            task.delay(0.42,function() Parry.reactMode=false end)
+        end
+    end)
+end
+
+if HitRunFX then HitRunFX.OnClientEvent:Connect(function()
+    MarkCombat()
+    if Parry.on then FQ:push("instant",false,nil) end
+end) end
+
+if KickComboFX then KickComboFX.OnClientEvent:Connect(function()
+    MarkCombat()
+    if Parry.on then FQ:push("prearm",true,nil) end
+end) end
+
+if CounterHitFX then CounterHitFX.OnClientEvent:Connect(function()
+    MarkCombat()
+    if Parry.on then FQ:push("reactive",false,nil) end
+end) end
+
+if GuardBreakFX then GuardBreakFX.OnClientEvent:Connect(function()
+    Parry.nextFire=0; Parry.firing=false; ClearSL()
+end) end
+
+-- successful parry -> learn that animation's hit delay
+if ParryFX then ParryFX.OnClientEvent:Connect(function(_, parrier)
+    -- v13: ParryFX di-broadcast ke semua pemain; cuma hitung kalau akulah parrier
+    if parrier ~= nil and parrier ~= LP.Character then return end
+    MarkCombat(); Parry.parryN=Parry.parryN+1; UpdateThr(false,nil); ClearSL(); PendResolve(true)
+    HoldParried()
+    local now=os.clock(); local root=MC.root
+    local bestPs, bestAge = nil, 9
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP then
+            local ps2=GPS(p.UserId)
+            local er=p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            local age=now-ps2.animT
+            if ps2.animName and not ps2.animHit and age<0.9 and er and root
+               and Dist(root,er)<=LCFG.HitRange and age<bestAge then
+                bestPs, bestAge = ps2, age
+            end
+        end
+    end
+    if bestPs then bestPs.animHit=true; LearnDelay(bestPs.animName, bestAge) end
+end) end
+
+-- ============================================================
+--  LOCK IMPLEMENTATION
+-- ============================================================
+local function LockBlocked()
+    local c=LP.Character; if not c then return true end
+    for _,s in ipairs(KO_ATTRS) do if c:GetAttribute(s)==true then return true end end
+    return false
+end
+local function ValidTgt(t)
+    if not t or not t.Parent then return false end
+    local c=t.Character; if not c then return false end
+    local h=c:FindFirstChild("Humanoid"); if not h or h.Health<=0 then return false end
+    local r=c:FindFirstChild("HumanoidRootPart"); if not r then return false end
+    return MC.root and Dist(MC.root,r)<=LCFG.Leash
+end
+local function DestroyCon()
+    pcall(function() if Lock.alignOri then Lock.alignOri:Destroy();Lock.alignOri=nil end end)
+    pcall(function() if Lock.att0 then Lock.att0:Destroy();Lock.att0=nil end end)
+end
+local function SetupCon()
+    local root=MC.root; if not root then return end
+    if Lock.alignOri and Lock.alignOri.Parent==root then return end
+    DestroyCon()
+    local att=Instance.new("Attachment"); att.Name=ATT_NAME; att.Parent=root; Lock.att0=att
+    local ao=Instance.new("AlignOrientation")
+    ao.Name=AO_NAME; ao.Mode=Enum.OrientationAlignmentMode.OneAttachment
+    ao.Attachment0=att; ao.MaxTorque=LCFG.MaxTorque; ao.MaxAngularVelocity=math.huge
+    ao.Responsiveness=LCFG.Resp; ao.RigidityEnabled=false; ao.PrimaryAxisOnly=false
+    ao.Parent=root; Lock.alignOri=ao
+end
+local function UpdVel(pos)
+    local now=os.clock(); local dt=now-Lock.velT
+    if Lock.prevPos and dt>0 and dt<0.3 then
+        local rv=(pos-Lock.prevPos)/dt
+        local alpha=math.clamp(0.38-(GetPing()-80)/2000,0.10,0.55)
+        Lock.vel=Lock.vel:Lerp(rv,alpha)
+    end
+    Lock.prevPos=pos; Lock.velT=now
+end
+local function SetAim(pos)
+    if not Lock.alignOri or LockBlocked() then return end
+    local root=MC.root; if not root then return end
+    local dir=pos-root.Position; dir=Vector3.new(dir.X,dir.Y*0.10,dir.Z)
+    if dir.Magnitude<0.05 then return end
+    dir=dir.Unit; local up=Vector3.new(0,1,0)
+    local right=dir:Cross(up); if right.Magnitude<0.01 then return end
+    right=right.Unit; Lock.alignOri.CFrame=CFrame.fromMatrix(Vector3.zero,right,right:Cross(dir).Unit)
+end
+
+GetBest = function(rescan)
+    local root=MC.root; if not root then return nil end
+    if not rescan and Lock.target and ValidTgt(Lock.target) then return Lock.target end
+    local best,bestEff=nil,-1
+    for _,p in pairs(Players:GetPlayers()) do
+        if p~=LP then
+            local c=p.Character; if not c then continue end
+            local r=c:FindFirstChild("HumanoidRootPart")
+            local h=c:FindFirstChild("Humanoid")
+            if not r or not h or h.Health<=0 then continue end
+            local d=Dist(root,r)
+            if d<=LCFG.Range then
+                local sc,_=Score(p,GPS(p.UserId))
+                local eff=sc-d*0.12
+                if eff>bestEff then bestEff=eff; best=p end
+            end
+        end
+    end
+    return best
+end
+
+-- UnlockTarget = neutral (target nil, Lock.on unchanged)
+UnlockTarget = function()
+    Lock.target=nil; Lock.prevPos=nil; Lock.vel=Vector3.zero
+    DestroyCon()
+end
+
+FullOff = function()
+    Lock.on=false; Lock.target=nil; Lock.inCombat=false; Lock.combatT=0
+    Lock.prevPos=nil; Lock.vel=Vector3.zero; Lock.isAtk=false
+    DestroyCon(); Parry.nextFire=0; Parry.firing=false; ClearSL()
+end
+
+-- THE ONLY FUNCTION THAT SETS Lock.target. Snaps aim immediately.
+LockOn = function(t)
+    if not t or not Lock.on or not CL.active then return end
+    local isNew = t ~= Lock.target
+    Lock.target = t; Lock.expT = os.clock() + EXCHANGE_TTL + 0.3
+    if isNew then Lock.prevPos=nil; Lock.vel=Vector3.zero end
+    SetupCon()
+    local er = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+    if er then SetAim(er.Position + Vector3.new(0,1.5,0)) end
+    MarkCombat()
+end
+
+-- ============================================================
+--  LOCK HEARTBEAT — aim + expiry only
+-- ============================================================
+RunService.Heartbeat:Connect(function(dt)
+    if os.clock()-Lock.combatT>5.0 then Lock.inCombat=false end
+    if not Lock.on then return end
+
+    if not CL.active then
+        if Lock.target then UnlockTarget() end
+        return
+    end
+
+    if Lock.target and os.clock()>Lock.expT then UnlockTarget(); return end
+    if Lock.target and not ValidTgt(Lock.target) then UnlockTarget(); return end
+
+    if not Lock.target then return end
+
+    local ec=Lock.target.Character; if not ec then return end
+    local er=ec:FindFirstChild("HumanoidRootPart"); if not er then return end
+    UpdVel(er.Position)
+    local ap=er.Position+Lock.vel*LCFG.Pred
+    SetAim(Vector3.new(ap.X, ap.Y+1.5, ap.Z))
+end)
+
+-- ============================================================
+--  HOOK SELF
+-- ============================================================
+local function HookSelf(char)
+    if not char then return end
+    local hum=char:FindFirstChildWhichIsA("Humanoid")
+
+    -- my swings: attributes
+    for _,a in ipairs(SELF_ATKS) do
+        pcall(function()
+            char:GetAttributeChangedSignal(a):Connect(function()
+                if char:GetAttribute(a)==true then MarkCombat(); MarkSwing() end
+            end)
+        end)
+    end
+    -- my swings: animations (fallback when attributes don't exist)
+    if hum then
+        local function hookAnim(an)
+            pcall(function()
+                an.AnimationPlayed:Connect(function(track)
+                    local ok,n=pcall(function() return track.Animation.Name end)
+                    if ok and n and not isReactAnim(n) and (isM1(n) or isM2(n)) then MarkSwing() end
+                end)
+            end)
+        end
+        local an=hum:FindFirstChildOfClass("Animator")
+        if an then hookAnim(an)
+        else hum.ChildAdded:Connect(function(c) if c:IsA("Animator") then hookAnim(c) end end) end
+    end
+
+    for _,a in ipairs(KO_ATTRS) do
+        pcall(function()
+            char:GetAttributeChangedSignal(a):Connect(function()
+                if char:GetAttribute(a)==true then
+                    Lock.target=nil; Lock.inCombat=false
+                    DestroyCon(); Parry.nextFire=0; Parry.firing=false; ClearSL()
+                end
+            end)
+        end)
+    end
+
+    if hum then
+        hum.Died:Connect(function() FullOff() end)
+
+        -- ragdoll detection (parry only; NEVER locks)
+        local rdlCd=0
+        hum:GetPropertyChangedSignal("FloorMaterial"):Connect(function()
+            local now=os.clock()
+            if hum.FloorMaterial==Enum.Material.Air then
+                task.delay(0.032,function()
+                    local root=MC.root; if not root then return end
+                    local v=root.Velocity; local c=MC.char
+                    local bh=c and (c:GetAttribute("IsBeingCarried")==true or c:GetAttribute("IsBeingFinished")==true)
+                    if (v.Y>8 or v.Y< -4 or bh) and now>rdlCd then
+                        rdlCd=now+0.18; SetRDL(true)
+                        if Parry.on then FQ:push("ragdoll",false,nil) end
+                    end
+                end)
+            else task.delay(0.065,function() SetRDL(false) end) end
+        end)
+
+        -- HIT-IN: HP dropped AND a real attacker identified -> lock + learn timing
+        local prevHP=hum.Health
+        hum:GetPropertyChangedSignal("Health"):Connect(function()
+            local cur=hum.Health
+            local drop=prevHP-cur
+            prevHP=cur
+            if drop < 0.5 then return end
+            MarkCombat(); PendFail()
+            local t=FindAttacker()
+            if t then
+                local ps=GPS(t.UserId)
+                if ps.animName and not ps.animHit then
+                    ps.animHit=true
+                    LearnDelay(ps.animName, os.clock()-ps.animT)
+                end
+                CL:onIncoming(t)
+            end
+        end)
+    end
+end
+
+LP.CharacterAdded:Connect(function(c)
+    UnlockTarget(); CL.active=false; CL.count=0
+    task.wait(0.16); HookSelf(c)
+end)
+if LP.Character then HookSelf(LP.Character) end
+Players.PlayerRemoving:Connect(function(p) if Lock.target==p then UnlockTarget() end end)
+
+LP.CharacterAdded:Connect(function()
+    RefreshChar()
+    task.wait(0.40); WatchAll()
+    task.wait(0.08); Decoy:sch(); Decoy:schS()
+end)
+
+-- ============================================================
+--  UI — MINIMAL
+-- ============================================================
+local old=PGui:FindFirstChild("WRAITH_UI"); if old then old:Destroy() end
+
+local SG=Instance.new("ScreenGui")
+SG.Name="WRAITH_UI"; SG.ResetOnSpawn=false
+SG.IgnoreGuiInset=true; SG.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+SG.Parent=PGui
+
+local Pill=Instance.new("TextButton")
+Pill.Size=UDim2.new(0,38,0,24); Pill.Position=UDim2.new(0,12,0.5,-12)
+Pill.BackgroundColor3=Color3.fromRGB(14,14,14); Pill.BackgroundTransparency=0.06
+Pill.TextColor3=Color3.fromRGB(140,140,140); Pill.TextSize=13
+Pill.Font=Enum.Font.GothamBold; Pill.Text="◈"
+Pill.BorderSizePixel=0; Pill.ZIndex=10; Pill.Active=true; Pill.Parent=SG
+Instance.new("UICorner",Pill).CornerRadius=UDim.new(1,0)
+local PS2=Instance.new("UIStroke",Pill); PS2.Thickness=1; PS2.Color=Color3.fromRGB(45,45,45)
+
+local Panel=Instance.new("Frame")
+Panel.Size=UDim2.new(0,160,0,110); Panel.Position=UDim2.new(0,56,0.5,-55)
+Panel.BackgroundColor3=Color3.fromRGB(9,9,9); Panel.BackgroundTransparency=0.08
+Panel.BorderSizePixel=0; Panel.Visible=false; Panel.Active=true; Panel.Parent=SG
+Instance.new("UICorner",Panel).CornerRadius=UDim.new(0,8)
+local PStr=Instance.new("UIStroke",Panel); PStr.Thickness=1; PStr.Color=Color3.fromRGB(38,38,38)
+
+local DH=Instance.new("Frame")
+DH.Size=UDim2.new(1,0,0,16); DH.BackgroundColor3=Color3.fromRGB(13,13,13)
+DH.BorderSizePixel=0; DH.Parent=Panel
+Instance.new("UICorner",DH).CornerRadius=UDim.new(0,8)
+local DHF=Instance.new("Frame"); DHF.Size=UDim2.new(1,0,0.5,0)
+DHF.Position=UDim2.new(0,0,0.5,0); DHF.BackgroundColor3=Color3.fromRGB(13,13,13)
+DHF.BorderSizePixel=0; DHF.Parent=DH
+local DHL=Instance.new("TextLabel"); DHL.Size=UDim2.new(1,-6,1,0)
+DHL.Position=UDim2.new(0,6,0,0); DHL.BackgroundTransparency=1
+DHL.TextColor3=Color3.fromRGB(55,55,55); DHL.TextSize=8
+DHL.Font=Enum.Font.GothamBold; DHL.TextXAlignment=Enum.TextXAlignment.Left
+DHL.Text="WRAITH v12.0"; DHL.Parent=DH
+
+local function Chip(txt,y)
+    local b=Instance.new("TextButton")
+    b.Size=UDim2.new(1,-12,0,24); b.Position=UDim2.new(0,6,0,y)
+    b.BackgroundColor3=Color3.fromRGB(22,22,22)
+    b.TextColor3=Color3.fromRGB(160,160,160); b.TextSize=10
+    b.Font=Enum.Font.GothamBold; b.Text=txt
+    b.BorderSizePixel=0; b.Parent=Panel
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+    return b
+end
+
+local PC=Chip("PARRY  OFF",19)
+local LC=Chip("LOCK   OFF",47)
+
+local Info=Instance.new("TextLabel")
+Info.Size=UDim2.new(1,-12,0,11); Info.Position=UDim2.new(0,6,0,76)
+Info.BackgroundTransparency=1; Info.TextColor3=Color3.fromRGB(48,48,48)
+Info.TextSize=8; Info.Font=Enum.Font.Gotham
+Info.TextXAlignment=Enum.TextXAlignment.Left
+Info.Text=""; Info.Parent=Panel
+
+local SL=Instance.new("TextLabel")
+SL.Size=UDim2.new(1,-12,0,10); SL.Position=UDim2.new(0,6,0,90)
+SL.BackgroundTransparency=1; SL.TextColor3=Color3.fromRGB(40,40,40)
+SL.TextSize=8; SL.Font=Enum.Font.Gotham
+SL.TextXAlignment=Enum.TextXAlignment.Left
+SL.Text="idle · neutral"; SL.Parent=Panel
+
+local panelOpen=false
+local function OpenP()
+    panelOpen=true; Panel.Visible=true; Panel.Size=UDim2.new(0,0,0,0)
+    TweenSvc:Create(Panel,TweenInfo.new(0.08,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),
+        {Size=UDim2.new(0,160,0,110)}):Play()
+end
+local function CloseP()
+    panelOpen=false
+    TweenSvc:Create(Panel,TweenInfo.new(0.07,Enum.EasingStyle.Quad,Enum.EasingDirection.In),
+        {Size=UDim2.new(0,0,0,0)}):Play()
+    task.delay(0.08,function() Panel.Visible=false end)
+end
+Pill.MouseButton1Click:Connect(function() if panelOpen then CloseP() else OpenP() end end)
+
+local function LearnedCount()
+    local n=0; for _,e in pairs(HD) do if e.n>=CFG.MinSamples then n=n+1 end end
+    return n
+end
+
+local _uiT=0
+local function UpdUI()
+    local rdl=RDL.on
+    if rdl and Parry.on then
+        Pill.BackgroundColor3=Color3.fromRGB(160,30,100); PS2.Color=Color3.fromRGB(240,60,160); Pill.TextColor3=Color3.fromRGB(255,180,230)
+    elseif Parry.on and Lock.on then
+        Pill.BackgroundColor3=Color3.fromRGB(0,120,88); PS2.Color=Color3.fromRGB(0,200,140); Pill.TextColor3=Color3.fromRGB(180,255,220)
+    elseif Parry.on then
+        Pill.BackgroundColor3=Color3.fromRGB(14,100,36); PS2.Color=Color3.fromRGB(22,180,65); Pill.TextColor3=Color3.fromRGB(160,255,160)
+    elseif Lock.on then
+        Pill.BackgroundColor3=Color3.fromRGB(12,60,155); PS2.Color=Color3.fromRGB(22,110,225); Pill.TextColor3=Color3.fromRGB(140,190,255)
+    else
+        Pill.BackgroundColor3=Color3.fromRGB(14,14,14); PS2.Color=Color3.fromRGB(45,45,45); Pill.TextColor3=Color3.fromRGB(140,140,140)
+    end
+    if not Panel.Visible then return end
+
+    if Parry.on then
+        PC.BackgroundColor3=rdl and Color3.fromRGB(120,16,78) or Color3.fromRGB(16,110,42)
+        PC.Text=rdl and "PARRY  ⚡RDL" or "PARRY  ON"
+        PC.TextColor3=rdl and Color3.fromRGB(255,140,210) or Color3.fromRGB(120,255,140)
+    else
+        PC.BackgroundColor3=Color3.fromRGB(22,22,22); PC.Text="PARRY  OFF"; PC.TextColor3=Color3.fromRGB(140,140,140)
+    end
+
+    if not Lock.on then
+        LC.BackgroundColor3=Color3.fromRGB(22,22,22); LC.Text="LOCK   OFF"; LC.TextColor3=Color3.fromRGB(140,140,140)
+    elseif not Lock.target then
+        LC.BackgroundColor3=Color3.fromRGB(20,20,50); LC.Text="LOCK  NEUTRAL"; LC.TextColor3=Color3.fromRGB(80,100,165)
+    elseif Lock.inCombat then
+        LC.BackgroundColor3=Color3.fromRGB(140,26,26); LC.Text="LOCK  ⚔COMBAT"; LC.TextColor3=Color3.fromRGB(255,130,130)
+    else
+        LC.BackgroundColor3=Color3.fromRGB(14,68,152); LC.Text="LOCK  ACTIVE"; LC.TextColor3=Color3.fromRGB(120,185,255)
+    end
+
+    local tot=Stat.ok+Stat.fail
+    local wr=tot>0 and math.floor(Stat.ok/tot*100) or 0
+    Info.Text=string.format("p:%dms P:%d M:%d L:%d W:%d%%",
+        math.floor(GetPing()), Parry.parryN, Parry.missN, LearnedCount(), wr)
+
+    if CL.active then
+        local left=math.max(0,math.floor((CL.lastT+EXCHANGE_TTL-os.clock())*10)/10)
+        SL.TextColor3=Color3.fromRGB(60,105,60)
+        local tName=Lock.target and Lock.target.Name or "?"
+        SL.Text=string.format("exchange %.1fs · %s", left, tName)
+    else
+        SL.TextColor3=Color3.fromRGB(40,40,40); SL.Text="idle · neutral"
+    end
+
+    PStr.Color=Parry.on and Lock.on and Color3.fromRGB(0,190,135)
+        or Parry.on and Color3.fromRGB(16,130,48)
+        or Lock.on and Color3.fromRGB(16,88,198)
+        or Color3.fromRGB(38,38,38)
+end
+
+RunService.RenderStepped:Connect(function()
+    local now=os.clock(); if now-_uiT<0.25 then return end; _uiT=now; UpdUI()
+end)
+
+local function ToggleParry()
+    Parry.on=not Parry.on; Parry.nextFire=0; Parry.firing=false; ClearSL(); UpdUI()
+end
+-- v11.2: turning lock ON never locks anything; it waits for a real hit
+local function ToggleLock()
+    Lock.on=not Lock.on
+    if not Lock.on then FullOff() end
+    UpdUI()
+end
+
+PC.MouseButton1Click:Connect(ToggleParry)
+LC.MouseButton1Click:Connect(ToggleLock)
+
+UIS.InputBegan:Connect(function(i,g)
+    if g then return end
+    if i.KeyCode==Enum.KeyCode.RightShift then ToggleParry() end
+    if i.KeyCode==Enum.KeyCode.RightControl then ToggleLock() end
+end)
+
+-- drag pill
+do
+    local dg,ds,sp=false,nil,nil
+    Pill.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dg=true;ds=i.Position;sp=Pill.Position
+            i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dg=false end end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if not dg then return end
+        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+            local d=i.Position-ds; Pill.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dg=false end
+    end)
+end
+
+-- drag panel
+do
+    local dg,ds,sp=false,nil,nil
+    DH.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dg=true;ds=i.Position;sp=Panel.Position
+            i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dg=false end end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if not dg then return end
+        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+            local d=i.Position-ds; Panel.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dg=false end
+    end)
+end
+
+-- init
+RefreshChar()
+UpdUI()
+print(string.format("[WRAITH v12.0] fps:%d ping:%dms jit:%dms cap:%d | RShift=Parry RCtrl=Lock",
+    FPS.v, math.floor(GetPing()), math.floor(GetJitter()), DynRL:cap()))
+
+-- v12: statistik buat tuning (jalanin WRAITH_DUMP() dari executor)
+env.WRAITH_DUMP = function()
+    local lines = { string.format("sukses=%d gagal=%d hasil=%d", Stat.ok, Stat.fail, Lead.n) }
+    for i, v in ipairs(CFG.LeadSet) do
+        lines[#lines+1] = string.format("lead %.2f  a=%.1f b=%.1f  mean=%.2f",
+            v, Lead.a[i], Lead.b[i], Lead.a[i] / (Lead.a[i] + Lead.b[i]))
+    end
+    for k, e in pairs(HD) do lines[#lines+1] = string.format("HD %s d=%.3f n=%d", k, e.d, e.n) end
+    local s = table.concat(lines, "\n")
+    if setclipboard then pcall(setclipboard, s) end
+    print(s)
+    return s
+end
+
+task.spawn(function()
+    while env.__WRAITH12 do
+        task.wait(25)
+        HDSave(true)
+    end
+end)
+
+]=====]
+
+-- ====================================================================
+--  START
+-- ====================================================================
+task.spawn(function()
+    runSource("NonoAntiLag", SRC.lag)
+    task.wait(0.3)
+    runSource("WRAITH", SRC.parry)
+    task.wait(0.3)
+    runSource("GymBot", SRC.gym)
+end)
+
+task.spawn(function()
+    if type(getgc) ~= "function" then
+        notify("Executor tanpa getgc: opsi gym/parry (selain tombol ON/OFF) pakai bawaan script")
+        return
+    end
+    task.wait(1.5)
+    local tries = 0
+    while alive and tries < 6 and (#cfgGym == 0 or #cfgParry == 0) do
+        tries = tries + 1
+        cfgGym, cfgParry = {}, {}
+        scanTables()
+        task.wait(4)
+    end
+end)
+
+task.spawn(function()
+    while alive do
+        pcall(linkGym)
+        pcall(linkLag)
+        pcall(linkParry)
+        for _, f in ipairs(refreshers) do pcall(f) end
+        local p = pingNow()
+        statLbl.Text = fpsNow .. " fps · " .. (p and (p .. " ms") or "-- ms")
+        task.wait(0.4)
+    end
+end)
+
+print("[SIFB] Skill Issue Final Boss by Duke | INSERT = buka/tutup")
