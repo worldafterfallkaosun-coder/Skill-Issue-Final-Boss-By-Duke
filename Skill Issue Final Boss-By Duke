@@ -1,5 +1,5 @@
 --[[
-  SKILL ISSUE FINAL BOSS v1.1  |  By Duke
+  SKILL ISSUE FINAL BOSS v1.2  |  By Duke
 
   Satu hub untuk tiga sistem:
     1. Gym bot       (auto gym, High School Anime)
@@ -3229,7 +3229,7 @@ print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", 
 -- =====================================================================
 --  DASAR
 -- =====================================================================
-local VERSION = "1.1"
+local VERSION = "1.2"
 
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
@@ -3294,6 +3294,8 @@ local TH = {
     err   = Color3.fromRGB(255, 92, 105),
     dark  = Color3.fromRGB(26, 12, 16),
     toast = Color3.fromRGB(34, 29, 56),
+    glass = Color3.fromRGB(26, 22, 46),
+    brand2 = ACCENTS[1][2],
 }
 local FD, FB, FS = Enum.Font.GothamBold, Enum.Font.GothamMedium, Enum.Font.Gotham
 
@@ -3338,7 +3340,7 @@ end
 local CFGFILE = "SIFB_config.json"
 local S = {
     op = 74, sc = 100, accent = 1, motion = true, mute = true, leafGuard = true, autosave = true, fast = false,
-    mini = false,
+    mini = false, fx = true, intro = true,
     hk = { hub = "RightAlt", gym = "F1", parry = "F2", lock = "F3", lag = "F4" },
     wp = nil, fp = nil, mp = nil,
     gym = {}, war = {}, slots = { gym = {}, war = {} },
@@ -3356,7 +3358,7 @@ local function loadSettings()
     local function bool(k) if type(d[k]) == "boolean" then S[k] = d[k] end end
     num("op", 30, 95); num("sc", 70, 130); num("accent", 1, #ACCENTS)
     S.accent = math.floor(S.accent)
-    bool("motion"); bool("mute"); bool("leafGuard"); bool("autosave"); bool("fast"); bool("mini")
+    bool("motion"); bool("mute"); bool("leafGuard"); bool("autosave"); bool("fast"); bool("mini"); bool("fx"); bool("intro")
     if type(d.hk) == "table" then
         for k, v in pairs(d.hk) do
             if S.hk[k] and type(v) == "string" then
@@ -3381,7 +3383,12 @@ local function loadSettings()
     end
 end
 loadSettings()
+local function hueShift(c, d)
+    local h, s, v = c:ToHSV()
+    return Color3.fromHSV((h + d) % 1, math.clamp(s, 0.4, 1), math.clamp(v + 0.05, 0.7, 1))
+end
 TH.brand = ACCENTS[S.accent][2]
+TH.brand2 = hueShift(TH.brand, 0.1)
 
 -- =====================================================================
 --  LOG DAN TOAST
@@ -3455,15 +3462,18 @@ local function toast(msg, kind)
     local col = TH[TOAST_KIND[kind or ""] or "mute"]
     local f = new("Frame", { Size = UDim2.fromOffset(0, 32), AutomaticSize = AUTO_XY, BackgroundColor3 = TH.toast,
         BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = nextLO() }, UI.toasts)
-    corner(f, 9)
+    corner(f, 10)
     local st = stroke(f, col, 1, 1)
-    padd(f, 6, 12, 6, 16)
+    padd(f, 6, 12, 8, 16)
     local bar = new("Frame", { Size = UDim2.new(0, 3, 1, 0), Position = UDim2.new(0, -10, 0, 0), BackgroundColor3 = col,
         BackgroundTransparency = 1, BorderSizePixel = 0 }, f)
     corner(bar, 2)
     local tl = label(f, tostring(msg), 12, TH.bone, FB, { Size = UDim2.fromOffset(0, 20), AutomaticSize = AUTO_XY,
         TextWrapped = true, TextTransparency = 1 })
     new("UISizeConstraint", { MaxSize = Vector2.new(300, 120) }, tl)
+    local prog = new("Frame", { Size = UDim2.new(1, 0, 0, 2), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 6),
+        BackgroundColor3 = col, BackgroundTransparency = 0.2, BorderSizePixel = 0 }, f)
+    TweenService:Create(prog, TweenInfo.new(2.8, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 0, 2) }):Play()
     tw(f, 0.18, { BackgroundTransparency = 0.04 }); tw(st, 0.18, { Transparency = 0.45 })
     tw(bar, 0.18, { BackgroundTransparency = 0 }); tw(tl, 0.18, { TextTransparency = 0 })
     local list = {}
@@ -3472,7 +3482,7 @@ local function toast(msg, kind)
     task.delay(2.8, function()
         if not f.Parent then return end
         tw(f, 0.2, { BackgroundTransparency = 1 }); tw(st, 0.2, { Transparency = 1 })
-        tw(bar, 0.2, { BackgroundTransparency = 1 }); tw(tl, 0.2, { TextTransparency = 1 })
+        tw(bar, 0.2, { BackgroundTransparency = 1 }); tw(tl, 0.2, { TextTransparency = 1 }); tw(prog, 0.2, { BackgroundTransparency = 1 })
         task.delay(0.25, function() if f.Parent then f:Destroy() end end)
     end)
 end
@@ -4300,13 +4310,32 @@ if not okp or not ROOT.Parent then
     ROOT.Parent = PGui
 end
 
-local HDR, TABH, FTR = 62, 38, 28
+local HDR, TABH, FTR = 70, 40, 28
 local WIN = { w = 392, h = 600 }
 local OPEN, MINI = true, false
+local START = os.clock()
+local MONO, BLACK = Enum.Font.RobotoMono, Enum.Font.GothamBlack
+local PROF = { gym = 1, war = 1 }
 
+local function ns(...)
+    local a, k = { ... }, {}
+    for i = 1, #a, 2 do k[#k + 1] = NumberSequenceKeypoint.new(a[i], a[i + 1]) end
+    return NumberSequence.new(k)
+end
+local function col(f) return f >= 55 and TH.on or (f >= 40 and TH.amb or TH.err) end
+local function colPing(p) return p < 90 and TH.on or (p < 160 and TH.amb or TH.err) end
+local function mmss(s) return string.format("%02d:%02d", math.floor(s / 60) % 100, math.floor(s) % 60) end
+
+-- ---------- jendela: dasar kaca gelap + border gradien yang berputar ----------
 UI.win = new("CanvasGroup", { Name = "Win", Size = UDim2.fromOffset(392, 600), Position = UDim2.fromOffset(40, 24),
-    BackgroundColor3 = TH.ink, BackgroundTransparency = 1 - S.op / 100, BorderSizePixel = 0, ClipsDescendants = true, Active = true }, ROOT)
-corner(UI.win, 16); stroke(UI.win, WHITE, 1, 0.9)
+    BackgroundColor3 = Color3.fromRGB(10, 8, 22), BackgroundTransparency = 1 - S.op / 100, BorderSizePixel = 0,
+    ClipsDescendants = true, Active = true }, ROOT)
+corner(UI.win, 18)
+UI.wstroke = stroke(UI.win, WHITE, 1.5, 0.1)
+UI.bgrad = new("UIGradient", { Rotation = 0 }, UI.wstroke)
+onTheme(function()
+    UI.bgrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, TH.brand), ColorSequenceKeypoint.new(0.5, TH.brand2), ColorSequenceKeypoint.new(1, TH.brand) })
+end)
 UI.wscale = new("UIScale", { Scale = S.sc / 100 }, UI.win)
 
 local function vp()
@@ -4331,11 +4360,519 @@ local function applyLayout()
     clampTo(UI.win, UI.win.Position.X.Offset, UI.win.Position.Y.Offset)
 end
 
+-- ---------- lapisan FX: tint gradien, aurora, partikel, scanline ----------
+UI.fx = new("Frame", { Name = "FX", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0 }, UI.win)
+local tint = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, UI.fx)
+UI.tintG = new("UIGradient", { Rotation = 60, Transparency = ns(0, 0.84, 0.5, 1, 1, 0.9) }, tint)
+onTheme(function() UI.tintG.Color = ColorSequence.new(TH.brand, TH.brand2) end)
+
+local function softCircle(parent, size, color)
+    local box = new("Frame", { Size = UDim2.fromOffset(size, size), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundTransparency = 1 }, parent)
+    local layers = {}
+    for i, k in ipairs({ 1, 0.72, 0.44 }) do
+        local f = new("Frame", { Size = UDim2.fromOffset(size * k, size * k), AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundColor3 = color, BackgroundTransparency = 0.955, BorderSizePixel = 0 }, box)
+        corner(f, size * k / 2)
+        layers[i] = f
+    end
+    return box, layers
+end
+UI.blobs = {}
+for i = 1, 3 do
+    local box, layers = softCircle(UI.fx, 240 + i * 30, TH.brand)
+    UI.blobs[i] = { f = box, ph = i * 2.1, sp = 0.14 + i * 0.04 }
+    onTheme(function()
+        for _, l in ipairs(layers) do l.BackgroundColor3 = (i == 2) and TH.brand2 or TH.brand end
+    end)
+end
+UI.parts = {}
+for i = 1, 12 do
+    local sz = 2 + (i % 3)
+    local f = new("Frame", { Size = UDim2.fromOffset(sz, sz), BackgroundColor3 = WHITE, BackgroundTransparency = 0.55 + (i % 4) * 0.1,
+        BorderSizePixel = 0, Position = UDim2.new(math.random(), 0, math.random(), 0) }, UI.fx)
+    corner(f, 2)
+    UI.parts[i] = { f = f, x = math.random(), y = math.random(), v = 0.02 + math.random() * 0.04 }
+end
+UI.scan = new("Frame", { Size = UDim2.new(1, 0, 0.14, 0), Position = UDim2.new(0, 0, -0.2, 0), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, UI.fx)
+new("UIGradient", { Rotation = 90, Transparency = ns(0, 1, 0.5, 0.94, 1, 1) }, UI.scan)
+
 -- watermark samar "By Duke"
 label(UI.win, "By Duke", 62, WHITE, FD, { Size = UDim2.fromOffset(260, 76), AnchorPoint = Vector2.new(1, 1),
     Position = UDim2.new(1, 14, 1, -40), Rotation = -12, TextTransparency = 0.965, TextXAlignment = Enum.TextXAlignment.Right })
 
--- ---------- drag ----------
+-- ---------- header: judul berkilau + glitch, bar boss HP ----------
+UI.hd = new("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, HDR), BackgroundTransparency = 1, Active = true }, UI.win)
+local hbg = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, UI.hd)
+local hbgG = new("UIGradient", { Rotation = 0, Transparency = ns(0, 0.86, 0.7, 0.96, 1, 1) }, hbg)
+onTheme(function() hbgG.Color = ColorSequence.new(TH.brand, TH.brand2) end)
+local hline = new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, UI.hd)
+new("UIGradient", { Transparency = ns(0, 1, 0.5, 0.75, 1, 1) }, hline)
+
+local TITLE = "SKILL ISSUE FINAL BOSS"
+local tpos, tsize = UDim2.fromOffset(14, 8), UDim2.new(1, -160, 0, 20)
+UI.gR = label(UI.hd, TITLE, 14, Color3.fromRGB(255, 60, 90), BLACK, { Position = tpos, Size = tsize, TextTransparency = 1 })
+UI.gC = label(UI.hd, TITLE, 14, Color3.fromRGB(60, 230, 255), BLACK, { Position = tpos, Size = tsize, TextTransparency = 1 })
+UI.title = label(UI.hd, TITLE, 14, WHITE, BLACK, { Position = tpos, Size = tsize, TextTruncate = Enum.TextTruncate.AtEnd })
+UI.tgrad = new("UIGradient", {}, UI.title)
+onTheme(function()
+    UI.tgrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, TH.bone), ColorSequenceKeypoint.new(0.38, TH.bone),
+        ColorSequenceKeypoint.new(0.5, TH.brand), ColorSequenceKeypoint.new(0.62, TH.bone), ColorSequenceKeypoint.new(1, TH.bone) })
+end)
+function UI.doGlitch()
+    if not S.fx then return end
+    UI.gR.Position = UDim2.fromOffset(12, 8); UI.gC.Position = UDim2.fromOffset(16, 9)
+    UI.gR.TextTransparency, UI.gC.TextTransparency = 0.45, 0.45
+    task.delay(0.09, function()
+        UI.gR.TextTransparency, UI.gC.TextTransparency = 1, 1
+        UI.gR.Position, UI.gC.Position = tpos, tpos
+    end)
+end
+
+UI.hp, UI.hpLast = {}, -1
+do
+    local box = new("Frame", { Position = UDim2.fromOffset(14, 32), Size = UDim2.new(1, -160, 0, 8), BackgroundTransparency = 1 }, UI.hd)
+    hlist(box, 2)
+    for i = 1, 20 do
+        local s = new("Frame", { Size = UDim2.new(1 / 20, -1.9, 1, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88,
+            BorderSizePixel = 0, LayoutOrder = i }, box)
+        corner(s, 2)
+        UI.hp[i] = s
+    end
+end
+function UI.setHP(frac)
+    local filled = math.floor(math.clamp(frac, 0, 1) * 20 + 0.5)
+    if filled == UI.hpLast then return end
+    UI.hpLast = filled
+    for i, s in ipairs(UI.hp) do
+        if i <= filled then
+            tw(s, 0.25, { BackgroundColor3 = TH.brand:Lerp(TH.brand2, i / 20), BackgroundTransparency = 0 })
+        else
+            tw(s, 0.25, { BackgroundColor3 = WHITE, BackgroundTransparency = 0.88 })
+        end
+    end
+end
+onTheme(function() UI.hpLast = -1 end)
+UI.cap = label(UI.hd, "BY DUKE · 0/3 AKTIF", 10, TH.mute, MONO, { Position = UDim2.fromOffset(14, 46), Size = UDim2.new(1, -160, 0, 14) })
+UI.hpTxt = label(UI.hd, "HP 100%", 10, TH.brand, MONO, { Position = UDim2.fromOffset(14, 46), Size = UDim2.new(1, -160, 0, 14), TextXAlignment = Enum.TextXAlignment.Right })
+onTheme(function() UI.hpTxt.TextColor3 = TH.brand end)
+
+local fpsPill = new("Frame", { Size = UDim2.fromOffset(58, 22), Position = UDim2.new(1, -144, 0, 14), BackgroundColor3 = Color3.fromRGB(8, 6, 16), BackgroundTransparency = 0.3, BorderSizePixel = 0 }, UI.hd)
+corner(fpsPill, 11); stroke(fpsPill, WHITE, 1, 0.85)
+UI.hfps = label(fpsPill, "-- fps", 11, TH.on, MONO, { Size = UDim2.new(1, 0, 1, 0), TextXAlignment = Enum.TextXAlignment.Center })
+
+function W.iconBtn(parent, kind, pos, onClick)
+    local b = new("TextButton", { Size = UDim2.fromOffset(28, 28), Position = pos, BackgroundColor3 = Color3.fromRGB(40, 36, 62),
+        BackgroundTransparency = 0.25, Text = "", AutoButtonColor = false, BorderSizePixel = 0 }, parent)
+    corner(b, 9)
+    local st = stroke(b, TH.brand, 1, 0.7)
+    onTheme(function() st.Color = TH.brand end)
+    if kind == "min" then
+        local l = new("Frame", { Size = UDim2.fromOffset(12, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundColor3 = TH.bone, BorderSizePixel = 0 }, b)
+        corner(l, 1)
+    else
+        local sz = kind == "compact" and Vector2.new(14, 8) or Vector2.new(12, 12)
+        local r = new("Frame", { Size = UDim2.fromOffset(sz.X, sz.Y), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+            BackgroundTransparency = 1, BorderSizePixel = 0 }, b)
+        corner(r, 3); stroke(r, TH.bone, 1.5, 0)
+    end
+    b.MouseButton1Down:Connect(function() tw(b, 0.08, { BackgroundTransparency = 0.05 }) end)
+    b.MouseButton1Up:Connect(function() tw(b, 0.12, { BackgroundTransparency = 0.25 }) end)
+    b.MouseLeave:Connect(function() tw(b, 0.12, { BackgroundTransparency = 0.25 }) end)
+    b.Activated:Connect(function()
+        if os.clock() - LASTDRAG < 0.25 then return end
+        onClick()
+    end)
+    return b
+end
+
+-- ---------- tab: pil geser + lencana status ----------
+local TABS = { { "home", "Beranda" }, { "gym", "Gym" }, { "com", "Combat" }, { "lag", "Anti-lag" }, { "cfg", "Setelan" } }
+UI.tabBar = new("Frame", { Size = UDim2.new(1, 0, 0, TABH), Position = UDim2.fromOffset(0, HDR), BackgroundTransparency = 1 }, UI.win)
+new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, UI.tabBar)
+UI.pill = new("Frame", { Size = UDim2.new(1 / #TABS, -10, 0, 28), Position = UDim2.new(0, 5, 0.5, -14), BackgroundColor3 = TH.brand,
+    BackgroundTransparency = 0.84, BorderSizePixel = 0 }, UI.tabBar)
+corner(UI.pill, 14)
+local pillSt = stroke(UI.pill, TH.brand, 1, 0.4)
+onTheme(function() UI.pill.BackgroundColor3 = TH.brand; pillSt.Color = TH.brand end)
+UI.groups, UI.panes, UI.tabBtn, UI.badge = {}, {}, {}, {}
+
+function W.showTab(id)
+    if id == curTab then return end
+    curTab = id
+    for k, g in pairs(UI.groups) do if k ~= id then g.Visible = false end end
+    local g = UI.groups[id]
+    g.Visible = true
+    local base = UDim2.fromOffset(0, HDR + TABH)
+    if S.motion then
+        g.GroupTransparency = 1; g.Position = UDim2.fromOffset(0, HDR + TABH + 12)
+        tw(g, 0.2, { GroupTransparency = 0, Position = base })
+    else
+        g.GroupTransparency = 0; g.Position = base
+    end
+    for i, t in ipairs(TABS) do
+        if t[1] == id then tw(UI.pill, 0.22, { Position = UDim2.new((i - 1) / #TABS, 5, 0.5, -14) }) end
+    end
+    for _, r in ipairs(REF) do if r.tab == id then runR(r, true) end end
+end
+
+for i, t in ipairs(TABS) do
+    local b = new("TextButton", { Size = UDim2.new(1 / #TABS, 0, 1, -1), Position = UDim2.new((i - 1) / #TABS, 0, 0, 0), BackgroundTransparency = 1,
+        Text = t[2], TextSize = 12, Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, UI.tabBar)
+    b.Activated:Connect(function() W.showTab(t[1]) end)
+    UI.tabBtn[t[1]] = b
+    if t[1] == "gym" or t[1] == "com" or t[1] == "lag" then
+        local d = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.new(1, -14, 0, 7), BackgroundColor3 = TH.on, BackgroundTransparency = 1, BorderSizePixel = 0 }, b)
+        corner(d, 3)
+        UI.badge[t[1]] = d
+    end
+    local g = new("CanvasGroup", { Name = "G_" .. t[1], Size = UDim2.new(1, 0, 1, -(HDR + TABH + FTR)), Position = UDim2.fromOffset(0, HDR + TABH),
+        BackgroundTransparency = 1, BorderSizePixel = 0, Visible = (t[1] == "home") }, UI.win)
+    local sf = new("ScrollingFrame", { Name = t[1], Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = TH.mute, CanvasSize = UDim2.new(), AutomaticCanvasSize = AUTO_Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y }, g)
+    padd(sf, 12, 12, 12, 12); vlist(sf, 8)
+    UI.groups[t[1]], UI.panes[t[1]] = g, sf
+end
+reg(function()
+    for id, b in pairs(UI.tabBtn) do b.TextColor3 = (id == curTab) and TH.bone or TH.mute end
+    local map = {
+        gym = { "gym", function() return K.gymGet() end },
+        com = { "war", function() return K.warGet("parry") or K.warGet("lock") end },
+        lag = { "lag", function() return V.lag.applied end },
+    }
+    for id, m in pairs(map) do
+        local d, st = UI.badge[id], MOD[m[1]].state
+        if st == "loading" then d.BackgroundColor3 = TH.amb; d.BackgroundTransparency = 0
+        elseif st ~= "ready" then d.BackgroundColor3 = TH.err; d.BackgroundTransparency = 0
+        elseif m[2]() then d.BackgroundColor3 = TH.on; d.BackgroundTransparency = 0
+        else d.BackgroundTransparency = 1 end
+    end
+end, true)
+
+-- ---------- footer + wadah toast ----------
+local foot = new("Frame", { Size = UDim2.new(1, 0, 0, FTR), Position = UDim2.new(0, 0, 1, -FTR), BackgroundTransparency = 1 }, UI.win)
+new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, foot)
+local fdot = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, 12, 0.5, -3), BackgroundColor3 = TH.brand, BorderSizePixel = 0 }, foot)
+corner(fdot, 3); onTheme(function() fdot.BackgroundColor3 = TH.brand end)
+label(foot, "BY DUKE", 11, TH.bone, BLACK, { Position = UDim2.fromOffset(24, 0), Size = UDim2.new(0.4, 0, 1, 0) })
+label(foot, "SKILL ISSUE FINAL BOSS · v" .. VERSION, 10, TH.mute, MONO, { Position = UDim2.new(0.3, 0, 0, 0), Size = UDim2.new(0.7, -12, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
+
+UI.toasts = new("Frame", { Size = UDim2.new(1, -24, 0, 0), AutomaticSize = AUTO_Y, AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, HDR + TABH + 8), BackgroundTransparency = 1, ZIndex = 30 }, UI.win)
+vlist(UI.toasts, 6, Enum.HorizontalAlignment.Center)
+
+-- =====================================================================
+--  WIDGET (gaya baru)
+-- =====================================================================
+function W.card(parent)
+    local f = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundColor3 = TH.glass,
+        BackgroundTransparency = 0.4, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
+    corner(f, 12); stroke(f, WHITE, 1, 0.9); padd(f, 0, 12, 0, 12); vlist(f, 0)
+    new("UIGradient", { Rotation = 90, Transparency = ns(0, 0, 1, 0.35) }, f)
+    return f
+end
+
+function W.heading(parent, text)
+    local s = (tostring(text):upper():gsub("(.)", "%1 "))
+    return label(parent, s, 10, TH.mute, MONO, { Size = UDim2.new(1, 0, 0, 18), LayoutOrder = nextLO() })
+end
+
+function W.switch(row)
+    local OFF = Color3.fromRGB(44, 40, 66)
+    local halo = new("Frame", { Size = UDim2.fromOffset(52, 34), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 7, 0.5, 0),
+        BackgroundColor3 = TH.on, BackgroundTransparency = 1, BorderSizePixel = 0 }, row)
+    corner(halo, 17)
+    local sw = new("Frame", { Size = UDim2.fromOffset(38, 22), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
+        BackgroundColor3 = OFF, BorderSizePixel = 0 }, row)
+    corner(sw, 11); stroke(sw, WHITE, 1, 0.85)
+    local knob = new("Frame", { Size = UDim2.fromOffset(16, 16), Position = UDim2.fromOffset(3, 3), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, sw)
+    corner(knob, 8)
+    local last = "init"
+    return function(state)
+        if state == last then return end
+        last = state
+        local on = state == true
+        tw(sw, 0.14, { BackgroundColor3 = on and TH.on or OFF })
+        tw(halo, 0.22, { BackgroundTransparency = on and 0.78 or 1 })
+        tw(knob, 0.16, { Position = on and UDim2.fromOffset(19, 3) or UDim2.fromOffset(3, 3),
+            BackgroundColor3 = (state == nil) and TH.mute or (on and TH.dark or WHITE) })
+    end
+end
+
+function W.btn(parent, text, style, onClick, props)
+    local p = { BackgroundColor3 = (style == "pri") and WHITE or Color3.fromRGB(40, 36, 62), BackgroundTransparency = (style == "pri") and 0 or 0.25,
+        Text = text, TextSize = 13, Font = FD, TextColor3 = TH.bone, AutoButtonColor = false, BorderSizePixel = 0 }
+    for k, v in pairs(props or {}) do p[k] = v end
+    local b = new("TextButton", p, parent)
+    corner(b, 10)
+    local st = stroke(b, WHITE, 1, 0.88)
+    if style == "pri" then
+        b.TextColor3 = TH.dark
+        st.Transparency = 1
+        local g = new("UIGradient", { Rotation = 0 }, b)
+        onTheme(function() g.Color = ColorSequence.new(TH.brand, TH.brand2) end)
+    elseif style == "dng" then
+        st.Transparency = 0.7
+        onTheme(function() b.TextColor3 = TH.err; st.Color = TH.err end)
+    else
+        st.Transparency = 0.75
+        onTheme(function() st.Color = TH.brand end)
+    end
+    local flash = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 5 }, b)
+    corner(flash, 10)
+    b.MouseButton1Down:Connect(function() tw(flash, 0.08, { BackgroundTransparency = 0.8 }) end)
+    b.MouseButton1Up:Connect(function() tw(flash, 0.18, { BackgroundTransparency = 1 }) end)
+    b.MouseLeave:Connect(function() tw(flash, 0.18, { BackgroundTransparency = 1 }) end)
+    b.Activated:Connect(onClick)
+    return b
+end
+
+function W.slider(parent, title, mn, mx, step, unit, get, set)
+    W.divider(parent)
+    local row = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
+    label(row, title, 13, TH.bone, FB, { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(1, -112, 0, 20), TextTruncate = Enum.TextTruncate.AtEnd })
+    local function stepBtn(txt, xoff)
+        local b = new("TextButton", { Size = UDim2.fromOffset(22, 22), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, xoff, 0, 7),
+            BackgroundColor3 = Color3.fromRGB(40, 36, 62), BackgroundTransparency = 0.2, Text = txt, TextSize = 14, Font = FD, TextColor3 = TH.bone,
+            AutoButtonColor = false, BorderSizePixel = 0 }, row)
+        corner(b, 7)
+        b.MouseButton1Down:Connect(function() tw(b, 0.07, { BackgroundTransparency = 0.6 }) end)
+        b.MouseButton1Up:Connect(function() tw(b, 0.12, { BackgroundTransparency = 0.2 }) end)
+        return b
+    end
+    local plus, minus = stepBtn("+", 0), stepBtn("-", -80)
+    local vl = label(row, "--", 12, TH.amb, MONO, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -24, 0, 8),
+        Size = UDim2.fromOffset(54, 20), TextXAlignment = Enum.TextXAlignment.Center })
+    local trk = new("Frame", { Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.86, BorderSizePixel = 0 }, row)
+    corner(trk, 3)
+    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0, BackgroundColor3 = WHITE }, trk)
+    corner(fill, 3)
+    local fg = new("UIGradient", {}, fill)
+    onTheme(function() fg.Color = ColorSequence.new(TH.brand, TH.brand2) end)
+    local halo = new("Frame", { Size = UDim2.fromOffset(28, 28), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = TH.brand, BackgroundTransparency = 0.8, BorderSizePixel = 0 }, trk)
+    corner(halo, 14); onTheme(function() halo.BackgroundColor3 = TH.brand end)
+    local thumb = new("Frame", { Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 3 }, trk)
+    corner(thumb, 8)
+    local hit = new("TextButton", { Size = UDim2.new(1, 0, 0, 26), Position = UDim2.fromOffset(0, 31), BackgroundTransparency = 1, Text = "",
+        AutoButtonColor = false, ZIndex = 4 }, row)
+    local dec = step >= 1 and 0 or #(tostring(step):match("%.(%d+)") or "")
+    local fmt = "%." .. dec .. "f"
+    local dragging, lastV = false, nil
+    local function paint(v)
+        local pct = math.clamp((v - mn) / (mx - mn), 0, 1)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        thumb.Position = UDim2.new(pct, 0, 0.5, 0)
+        halo.Position = UDim2.new(pct, 0, 0.5, 0)
+        vl.Text = string.format(fmt, v) .. unit
+    end
+    local function fromX(x)
+        local w = math.max(trk.AbsoluteSize.X, 1)
+        local pct = math.clamp((x - trk.AbsolutePosition.X) / w, 0, 1)
+        local v = mn + math.floor(pct * (mx - mn) / step + 0.5) * step
+        return tonumber(string.format(fmt, math.clamp(v, mn, mx)))
+    end
+    local function nudge(dir)
+        local v = get()
+        if not v then toast("Modul belum siap atau opsi tidak tersedia", "warn"); return end
+        local nv = tonumber(string.format(fmt, math.clamp(v + dir * step, mn, mx)))
+        paint(nv); set(nv, true)
+    end
+    plus.Activated:Connect(function() nudge(1) end)
+    minus.Activated:Connect(function() nudge(-1) end)
+    hit.InputBegan:Connect(function(i)
+        if not isPtr(i) then return end
+        local pane = row:FindFirstAncestorOfClass("ScrollingFrame")
+        if pane then pane.ScrollingEnabled = false end
+        dragging = true
+        halo.BackgroundTransparency = 0.6
+        lastV = fromX(i.Position.X); paint(lastV); set(lastV, false)
+        DRAG = {
+            move = function(p) lastV = fromX(p.X); paint(lastV); set(lastV, false) end,
+            stop = function()
+                dragging = false
+                halo.BackgroundTransparency = 0.8
+                if pane then pane.ScrollingEnabled = true end
+                set(lastV, true)
+            end,
+        }
+    end)
+    reg(function()
+        if dragging then return end
+        local v = get()
+        if v then paint(v) else vl.Text = "--"; fill.Size = UDim2.new(0, 0, 1, 0); thumb.Position = UDim2.new(0, 0, 0.5, 0); halo.Position = UDim2.new(0, 0, 0.5, 0) end
+    end)
+end
+
+function W.seg(parent, labels, get, onPick)
+    local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = Color3.fromRGB(8, 6, 16), BackgroundTransparency = 0.35,
+        BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
+    corner(bar, 10); stroke(bar, WHITE, 1, 0.92); padd(bar, 3, 3, 3, 3)
+    local n = #labels
+    local hl = new("Frame", { Size = UDim2.new(1 / n, 0, 1, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 1, BorderSizePixel = 0 }, bar)
+    corner(hl, 8)
+    local hg = new("UIGradient", {}, hl)
+    onTheme(function() hg.Color = ColorSequence.new(TH.brand, TH.brand2) end)
+    local rowf = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, bar)
+    hlist(rowf, 0)
+    local btns = {}
+    for i, t in ipairs(labels) do
+        local b = new("TextButton", { Size = UDim2.new(1 / n, 0, 1, 0), BackgroundTransparency = 1, Text = t, TextSize = 12, Font = FD,
+            TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0, LayoutOrder = i }, rowf)
+        b.Activated:Connect(function() onPick(i) end)
+        btns[i] = b
+    end
+    local last = "init"
+    reg(function()
+        local cur = get()
+        if cur ~= last then
+            last = cur
+            if cur then
+                hl.BackgroundTransparency = 0
+                tw(hl, 0.2, { Position = UDim2.new((cur - 1) / n, 0, 0, 0) })
+            else
+                tw(hl, 0.15, { BackgroundTransparency = 1 })
+            end
+        end
+        for i, b in ipairs(btns) do b.TextColor3 = (cur == i) and TH.dark or TH.mute end
+    end)
+end
+
+function W.grid(parent, items)
+    local n, gap = #items, 8
+    local f = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
+    hlist(f, gap)
+    local vals = {}
+    for i, it in ipairs(items) do
+        local b = new("Frame", { Size = UDim2.new(1 / n, -gap * (n - 1) / n, 1, 0), BackgroundColor3 = TH.glass, BackgroundTransparency = 0.4,
+            BorderSizePixel = 0, LayoutOrder = i }, f)
+        corner(b, 10); stroke(b, WHITE, 1, 0.9)
+        new("UIGradient", { Rotation = 90, Transparency = ns(0, 0, 1, 0.35) }, b)
+        vals[it[1]] = label(b, "--", 17, TH.bone, BLACK, { Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 9), TextXAlignment = Enum.TextXAlignment.Center })
+        label(b, string.upper(it[2]), 9, TH.mute, MONO, { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 36), TextXAlignment = Enum.TextXAlignment.Center })
+    end
+    return vals
+end
+
+function W.meter(parent)
+    local m = new("Frame", { Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
+    corner(m, 3)
+    local f = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = TH.on, BorderSizePixel = 0 }, m)
+    corner(f, 3)
+    return function(pct, c)
+        tw(f, 0.3, { Size = UDim2.new(math.clamp(pct, 0, 100) / 100, 0, 1, 0), BackgroundColor3 = c })
+    end
+end
+
+-- indikator lingkaran (gauge) dengan dua setengah lingkaran bergradien
+function W.gauge(parent, D, T, pos)
+    local box = new("Frame", { Size = UDim2.fromOffset(D, D), Position = pos, BackgroundTransparency = 1 }, parent)
+    local inner = D - 2 * T
+    local base = new("Frame", { Size = UDim2.fromOffset(inner, inner), Position = UDim2.fromOffset(T, T), BackgroundTransparency = 1 }, box)
+    corner(base, inner / 2); stroke(base, WHITE, T, 0.9)
+    local seq = ns(0, 0, 0.5, 0, 0.501, 1, 1, 1)
+    local strokes, grads = {}, {}
+    for _, right in ipairs({ true, false }) do
+        local clip = new("Frame", { Size = UDim2.fromOffset(D / 2, D), Position = UDim2.fromOffset(right and D / 2 or 0, 0), BackgroundTransparency = 1, ClipsDescendants = true }, box)
+        local circ = new("Frame", { Size = UDim2.fromOffset(inner, inner), Position = UDim2.fromOffset(right and (T - D / 2) or T, T), BackgroundTransparency = 1 }, clip)
+        corner(circ, inner / 2)
+        local st = stroke(circ, TH.brand, T, 0)
+        grads[#grads + 1] = new("UIGradient", { Transparency = seq, Rotation = right and 0 or 180 }, st)
+        strokes[#strokes + 1] = st
+    end
+    local val = label(box, "--", math.floor(D * 0.27), TH.bone, BLACK, { Size = UDim2.new(1, 0, 0, math.floor(D * 0.3)),
+        Position = UDim2.new(0, 0, 0.5, -math.floor(D * 0.2)), TextXAlignment = Enum.TextXAlignment.Center })
+    local cap = label(box, "FPS", 10, TH.mute, MONO, { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0.5, math.floor(D * 0.12)),
+        TextXAlignment = Enum.TextXAlignment.Center })
+    return function(pct, color, text, caption)
+        local ang = math.clamp(pct, 0, 1) * 360
+        tw(grads[1], 0.35, { Rotation = math.clamp(ang, 0, 180) })
+        tw(grads[2], 0.35, { Rotation = math.clamp(ang, 180, 360) })
+        for _, s in ipairs(strokes) do tw(s, 0.3, { Color = color }) end
+        val.Text = text
+        if caption then cap.Text = caption end
+    end
+end
+
+-- ubin daya: besar, bercahaya saat aktif
+function W.tile(parent, title, getOn, getState, onTap)
+    local wrap = new("Frame", { Size = UDim2.new(0.25, -6, 1, 0), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
+    local halo = new("Frame", { Size = UDim2.new(1, 10, 1, 10), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        BackgroundColor3 = TH.on, BackgroundTransparency = 1, BorderSizePixel = 0 }, wrap)
+    corner(halo, 16)
+    local b = new("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(30, 26, 52), BackgroundTransparency = 0.15,
+        Text = "", AutoButtonColor = false, BorderSizePixel = 0 }, wrap)
+    corner(b, 12)
+    local st = stroke(b, WHITE, 1.5, 0.88)
+    new("UIGradient", { Rotation = 90, Transparency = ns(0, 0, 1, 0.4) }, b)
+    local led = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0.5, -3, 0, 9), BackgroundColor3 = TH.mute, BorderSizePixel = 0 }, b)
+    corner(led, 3)
+    label(b, title, 14, TH.bone, BLACK, { Size = UDim2.new(1, 0, 0, 20), Position = UDim2.new(0, 0, 0, 22), TextXAlignment = Enum.TextXAlignment.Center })
+    local stl = label(b, "OFF", 10, TH.mute, MONO, { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0, 46), TextXAlignment = Enum.TextXAlignment.Center })
+    local flash = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 5 }, b)
+    corner(flash, 12)
+    b.MouseButton1Down:Connect(function() tw(flash, 0.08, { BackgroundTransparency = 0.85 }) end)
+    b.MouseButton1Up:Connect(function() tw(flash, 0.2, { BackgroundTransparency = 1 }) end)
+    b.MouseLeave:Connect(function() tw(flash, 0.2, { BackgroundTransparency = 1 }) end)
+    b.Activated:Connect(onTap)
+    local lastKey
+    reg(function()
+        local on = getOn() == true
+        local txt, c = getState()
+        local key = tostring(on) .. txt
+        if key == lastKey then return end
+        lastKey = key
+        stl.Text = txt; stl.TextColor3 = c
+        led.BackgroundColor3 = c
+        tw(halo, 0.25, { BackgroundTransparency = on and 0.82 or 1 })
+        tw(st, 0.25, { Color = on and TH.on or WHITE, Transparency = on and 0.15 or 0.88 })
+    end)
+end
+
+-- layar pembuka bergaya boot boss
+function W.intro(force)
+    if not (S.intro or force) then return end
+    local ov = new("CanvasGroup", { Name = "Intro", Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(8, 6, 16),
+        BorderSizePixel = 0, ZIndex = 200, Active = true }, UI.win)
+    local skip = false
+    ov.InputBegan:Connect(function(i) if isPtr(i) then skip = true end end)
+    local C = Enum.TextXAlignment.Center
+    local t1 = label(ov, "SKILL ISSUE", 30, TH.bone, BLACK, { Size = UDim2.new(1, 0, 0, 36), Position = UDim2.new(0, 0, 0.2, 0), TextXAlignment = C, TextTransparency = 1, ZIndex = 201 })
+    local t2 = label(ov, "FINAL BOSS", 40, WHITE, BLACK, { Size = UDim2.new(1, 0, 0, 46), Position = UDim2.new(0, 0, 0.2, 38), TextXAlignment = C, TextTransparency = 1, ZIndex = 201 })
+    local g2 = new("UIGradient", { Color = ColorSequence.new(TH.brand, TH.brand2) }, t2)
+    local by = label(ov, "B Y   D U K E", 11, TH.mute, MONO, { Size = UDim2.new(1, 0, 0, 16), Position = UDim2.new(0, 0, 0.2, 92), TextXAlignment = C, TextTransparency = 1, ZIndex = 201 })
+    local bar = new("Frame", { Size = UDim2.new(0.62, 0, 0, 8), AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.52, 0),
+        BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0, ZIndex = 201 }, ov)
+    corner(bar, 4)
+    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 202 }, bar)
+    corner(fill, 4)
+    new("UIGradient", { Color = ColorSequence.new(TH.brand, TH.brand2) }, fill)
+    local term = label(ov, "", 11, TH.on, MONO, { Size = UDim2.new(0.62, 0, 0, 90), AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.52, 18),
+        ZIndex = 201, TextYAlignment = Enum.TextYAlignment.Top })
+    local lines = { "> memuat gym bot ........ ok", "> memuat combat tools ... ok", "> memuat anti-lag ....... ok", "> sinkron konfigurasi ... ok", "> boss siap dihadapi" }
+    task.spawn(function()
+        local function pause(t)
+            local e = os.clock() + t
+            while os.clock() < e and not skip and alive do task.wait() end
+        end
+        tw(t1, 0.3, { TextTransparency = 0 }); pause(0.15)
+        tw(t2, 0.3, { TextTransparency = 0 }); pause(0.15)
+        tw(by, 0.3, { TextTransparency = 0 }); pause(0.1)
+        for i = 1, #lines do
+            if skip or not alive then break end
+            term.Text = table.concat(lines, "\n", 1, i)
+            tw(fill, 0.22, { Size = UDim2.new(i / #lines, 0, 1, 0) })
+            pause(0.2)
+        end
+        pause(0.25)
+        tw(ov, 0.35, { GroupTransparency = 1 })
+        task.wait(0.4)
+        ov:Destroy()
+    end)
+end
+
 function W.startDrag(obj, input, onTap, onHold, onDone)
     local sx, sy = input.Position.X, input.Position.Y
     local ox, oy = obj.Position.X.Offset, obj.Position.Y.Offset
@@ -4364,114 +4901,12 @@ function W.startDrag(obj, input, onTap, onHold, onDone)
     end
 end
 
--- ---------- header ----------
-UI.hd = new("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, HDR), BackgroundTransparency = 1, Active = true }, UI.win)
-new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, UI.hd)
-label(UI.hd, "Skill issue final boss", 15, TH.bone, FD, { Position = UDim2.fromOffset(12, 9), Size = UDim2.new(1, -160, 0, 18) })
-UI.sub = label(UI.hd, "By Duke · 0/3 aktif", 11, TH.mute, FS, { Position = UDim2.fromOffset(12, 28), Size = UDim2.new(1, -160, 0, 14) })
-UI.segs = {}
-for i = 1, 3 do
-    local s = new("Frame", { Size = UDim2.fromOffset(40, 5), Position = UDim2.fromOffset(12 + (i - 1) * 43, 48), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0 }, UI.hd)
-    corner(s, 2); UI.segs[i] = s
-end
-local fpsPill = new("Frame", { Size = UDim2.fromOffset(58, 22), Position = UDim2.new(1, -144, 0, 14), BackgroundTransparency = 1 }, UI.hd)
-corner(fpsPill, 11); stroke(fpsPill, WHITE, 1, 0.85)
-UI.hfps = label(fpsPill, "-- fps", 11, TH.on, FD, { Size = UDim2.new(1, 0, 1, 0), TextXAlignment = CENTER })
-
-function W.iconBtn(parent, kind, pos, onClick)
-    local b = new("TextButton", { Size = UDim2.fromOffset(28, 28), Position = pos, BackgroundColor3 = WHITE, BackgroundTransparency = 0.94,
-        Text = "", AutoButtonColor = false, BorderSizePixel = 0 }, parent)
-    corner(b, 8); stroke(b, WHITE, 1, 0.9)
-    if kind == "min" then
-        local l = new("Frame", { Size = UDim2.fromOffset(12, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundColor3 = TH.bone, BorderSizePixel = 0 }, b)
-        corner(l, 1)
-    else
-        local sz = kind == "compact" and Vector2.new(14, 8) or Vector2.new(12, 12)
-        local r = new("Frame", { Size = UDim2.fromOffset(sz.X, sz.Y), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-            BackgroundTransparency = 1, BorderSizePixel = 0 }, b)
-        corner(r, 3); stroke(r, TH.bone, 1.5, 0)
-    end
-    b.Activated:Connect(function()
-        if os.clock() - LASTDRAG < 0.25 then return end
-        onClick()
-    end)
-    return b
-end
-
--- ---------- tab ----------
-local TABS = { { "home", "Beranda" }, { "gym", "Gym" }, { "com", "Combat" }, { "lag", "Anti-lag" }, { "cfg", "Setelan" } }
-UI.tabBar = new("Frame", { Size = UDim2.new(1, 0, 0, TABH), Position = UDim2.fromOffset(0, HDR), BackgroundTransparency = 1 }, UI.win)
-new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, UI.tabBar)
-UI.ind = new("Frame", { Size = UDim2.new(1 / #TABS, -16, 0, 2), Position = UDim2.new(0, 8, 1, -2), BackgroundColor3 = TH.brand, BorderSizePixel = 0 }, UI.tabBar)
-corner(UI.ind, 1); onTheme(function() UI.ind.BackgroundColor3 = TH.brand end)
-UI.groups, UI.panes, UI.tabBtn = {}, {}, {}
-
-function W.showTab(id)
-    if id == curTab then return end
-    curTab = id
-    for k, g in pairs(UI.groups) do if k ~= id then g.Visible = false end end
-    local g = UI.groups[id]
-    g.Visible = true
-    local base = UDim2.fromOffset(0, HDR + TABH)
-    if S.motion then
-        g.GroupTransparency = 1; g.Position = UDim2.fromOffset(0, HDR + TABH + 10)
-        tw(g, 0.16, { GroupTransparency = 0, Position = base })
-    else
-        g.GroupTransparency = 0; g.Position = base
-    end
-    for i, t in ipairs(TABS) do
-        if t[1] == id then tw(UI.ind, 0.18, { Position = UDim2.new((i - 1) / #TABS, 8, 1, -2) }) end
-    end
-    for _, r in ipairs(REF) do if r.tab == id then runR(r, true) end end
-end
-
-for i, t in ipairs(TABS) do
-    local b = new("TextButton", { Size = UDim2.new(1 / #TABS, 0, 1, -1), Position = UDim2.new((i - 1) / #TABS, 0, 0, 0), BackgroundTransparency = 1,
-        Text = t[2], TextSize = 12, Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, UI.tabBar)
-    b.Activated:Connect(function() W.showTab(t[1]) end)
-    UI.tabBtn[t[1]] = b
-    local g = new("CanvasGroup", { Name = "G_" .. t[1], Size = UDim2.new(1, 0, 1, -(HDR + TABH + FTR)), Position = UDim2.fromOffset(0, HDR + TABH),
-        BackgroundTransparency = 1, BorderSizePixel = 0, Visible = (t[1] == "home") }, UI.win)
-    local sf = new("ScrollingFrame", { Name = t[1], Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
-        ScrollBarThickness = 3, ScrollBarImageColor3 = TH.mute, CanvasSize = UDim2.new(), AutomaticCanvasSize = AUTO_Y,
-        ScrollingDirection = Enum.ScrollingDirection.Y }, g)
-    padd(sf, 12, 12, 12, 12); vlist(sf, 8)
-    UI.groups[t[1]], UI.panes[t[1]] = g, sf
-end
-reg(function()
-    for id, b in pairs(UI.tabBtn) do b.TextColor3 = (id == curTab) and TH.bone or TH.mute end
-end, true)
-
--- ---------- footer + toast ----------
-local foot = new("Frame", { Size = UDim2.new(1, 0, 0, FTR), Position = UDim2.new(0, 0, 1, -FTR), BackgroundTransparency = 1 }, UI.win)
-new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, foot)
-local fdot = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, 12, 0.5, -3), BackgroundColor3 = TH.brand, BorderSizePixel = 0 }, foot)
-corner(fdot, 3); onTheme(function() fdot.BackgroundColor3 = TH.brand end)
-label(foot, "By Duke", 12, TH.bone, FD, { Position = UDim2.fromOffset(24, 0), Size = UDim2.new(0.4, 0, 1, 0) })
-label(foot, "Skill issue final boss · v" .. VERSION, 11, TH.mute, FS, { Position = UDim2.new(0.4, 0, 0, 0), Size = UDim2.new(0.6, -12, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
-
-UI.toasts = new("Frame", { Size = UDim2.new(1, -24, 0, 0), AutomaticSize = AUTO_Y, AnchorPoint = Vector2.new(0.5, 0),
-    Position = UDim2.new(0.5, 0, 0, HDR + TABH + 8), BackgroundTransparency = 1, ZIndex = 30 }, UI.win)
-vlist(UI.toasts, 6, Enum.HorizontalAlignment.Center)
-
--- =====================================================================
---  WIDGET
--- =====================================================================
-function W.card(parent)
-    local f = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundColor3 = WHITE,
-        BackgroundTransparency = 0.955, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
-    corner(f, 10); stroke(f, WHITE, 1, 0.9); padd(f, 0, 12, 0, 12); vlist(f, 0)
-    return f
-end
 function W.divider(parent)
     local n = parent:GetAttribute("n") or 0
     parent:SetAttribute("n", n + 1)
     if n > 0 then
         new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
     end
-end
-function W.heading(parent, text)
-    return label(parent, text, 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 16), LayoutOrder = nextLO() })
 end
 
 function W.row(parent, title, sub, clickable, rightW, leftPad)
@@ -4487,22 +4922,6 @@ function W.row(parent, title, sub, clickable, rightW, leftPad)
         if type(sub) == "function" then reg(function() sl.Text = sub() end) else sl.Text = sub end
     end
     return row
-end
-
-function W.switch(row)
-    local sw = new("Frame", { Size = UDim2.fromOffset(36, 21), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
-        BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, row)
-    corner(sw, 11)
-    local knob = new("Frame", { Size = UDim2.fromOffset(15, 15), Position = UDim2.fromOffset(3, 3), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, sw)
-    corner(knob, 8)
-    local last = "init"
-    return function(state)
-        if state == last then return end
-        last = state
-        local on = state == true
-        tw(sw, 0.12, { BackgroundColor3 = on and TH.on or WHITE, BackgroundTransparency = on and 0 or 0.9 })
-        tw(knob, 0.12, { Position = on and UDim2.fromOffset(18, 3) or UDim2.fromOffset(3, 3), BackgroundColor3 = (state == nil) and TH.mute or WHITE })
-    end
 end
 
 function W.toggle(parent, title, sub, get, flip)
@@ -4525,27 +4944,6 @@ function W.chipRow(parent, title, sub)
     return function(t, c) cl.Text = t; cl.TextColor3 = c end
 end
 
-function W.btn(parent, text, style, onClick, props)
-    local base = (style == "pri") and 0 or 0.93
-    local p = { BackgroundColor3 = WHITE, BackgroundTransparency = base, Text = text, TextSize = 13, Font = FD,
-        TextColor3 = TH.bone, AutoButtonColor = false, BorderSizePixel = 0 }
-    for k, v in pairs(props or {}) do p[k] = v end
-    local b = new("TextButton", p, parent)
-    corner(b, 9); stroke(b, WHITE, 1, 0.9)
-    if style == "pri" then
-        b.TextColor3 = TH.dark
-        onTheme(function() b.BackgroundColor3 = TH.brand end)
-    elseif style == "dng" then
-        onTheme(function() b.TextColor3 = TH.err end)
-    end
-    b.MouseButton1Down:Connect(function() tw(b, 0.08, { BackgroundTransparency = (style == "pri") and 0.2 or 0.82 }) end)
-    b.MouseButton1Up:Connect(function() tw(b, 0.12, { BackgroundTransparency = base }) end)
-    b.MouseLeave:Connect(function() tw(b, 0.12, { BackgroundTransparency = base }) end)
-    b.Activated:Connect(onClick)
-    return b
-end
-
--- tombol dua langkah: ketukan pertama minta konfirmasi
 function W.confirm(parent, text, onYes, props)
     local armed, b = 0, nil
     b = W.btn(parent, text, "dng", function()
@@ -4589,123 +4987,6 @@ function W.dot(row, fn)
     reg(function() d.BackgroundColor3 = fn() end)
 end
 
-function W.slider(parent, title, mn, mx, step, unit, get, set)
-    W.divider(parent)
-    local row = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
-    label(row, title, 13, TH.bone, FB, { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(1, -112, 0, 20), TextTruncate = Enum.TextTruncate.AtEnd })
-    local function stepBtn(txt, xoff)
-        local b = new("TextButton", { Size = UDim2.fromOffset(22, 22), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, xoff, 0, 7),
-            BackgroundColor3 = WHITE, BackgroundTransparency = 0.92, Text = txt, TextSize = 14, Font = FD, TextColor3 = TH.bone,
-            AutoButtonColor = false, BorderSizePixel = 0 }, row)
-        corner(b, 6)
-        return b
-    end
-    local plus, minus = stepBtn("+", 0), stepBtn("-", -80)
-    local vl = label(row, "--", 12, TH.amb, FD, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -24, 0, 8),
-        Size = UDim2.fromOffset(54, 20), TextXAlignment = CENTER })
-    local trk = new("Frame", { Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.84, BorderSizePixel = 0 }, row)
-    corner(trk, 3)
-    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0, BackgroundColor3 = TH.brand }, trk)
-    corner(fill, 3); onTheme(function() fill.BackgroundColor3 = TH.brand end)
-    local thumb = new("Frame", { Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
-        BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 3 }, trk)
-    corner(thumb, 8)
-    local hit = new("TextButton", { Size = UDim2.new(1, 0, 0, 26), Position = UDim2.fromOffset(0, 31), BackgroundTransparency = 1, Text = "",
-        AutoButtonColor = false, ZIndex = 4 }, row)
-    local dec = step >= 1 and 0 or #(tostring(step):match("%.(%d+)") or "")
-    local fmt = "%." .. dec .. "f"
-    local dragging, lastV = false, nil
-    local function paint(v)
-        local pct = math.clamp((v - mn) / (mx - mn), 0, 1)
-        fill.Size = UDim2.new(pct, 0, 1, 0)
-        thumb.Position = UDim2.new(pct, 0, 0.5, 0)
-        vl.Text = string.format(fmt, v) .. unit
-    end
-    local function fromX(x)
-        local w = math.max(trk.AbsoluteSize.X, 1)
-        local pct = math.clamp((x - trk.AbsolutePosition.X) / w, 0, 1)
-        local v = mn + math.floor(pct * (mx - mn) / step + 0.5) * step
-        return tonumber(string.format(fmt, math.clamp(v, mn, mx)))
-    end
-    local function nudge(dir)
-        local v = get()
-        if not v then toast("Modul belum siap atau opsi tidak tersedia", "warn"); return end
-        local nv = tonumber(string.format(fmt, math.clamp(v + dir * step, mn, mx)))
-        paint(nv); set(nv, true)
-    end
-    plus.Activated:Connect(function() nudge(1) end)
-    minus.Activated:Connect(function() nudge(-1) end)
-    hit.InputBegan:Connect(function(i)
-        if not isPtr(i) then return end
-        local pane = row:FindFirstAncestorOfClass("ScrollingFrame")
-        if pane then pane.ScrollingEnabled = false end
-        dragging = true
-        lastV = fromX(i.Position.X); paint(lastV); set(lastV, false)
-        DRAG = {
-            move = function(p) lastV = fromX(p.X); paint(lastV); set(lastV, false) end,
-            stop = function()
-                dragging = false
-                if pane then pane.ScrollingEnabled = true end
-                set(lastV, true)
-            end,
-        }
-    end)
-    reg(function()
-        if dragging then return end
-        local v = get()
-        if v then paint(v) else vl.Text = "--"; fill.Size = UDim2.new(0, 0, 1, 0); thumb.Position = UDim2.new(0, 0, 0.5, 0) end
-    end)
-end
-
-function W.seg(parent, labels, get, onPick)
-    local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.72,
-        BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
-    corner(bar, 9); padd(bar, 2, 2, 2, 2); hlist(bar, 2)
-    local n, btns = #labels, {}
-    for i, t in ipairs(labels) do
-        local b = new("TextButton", { Size = UDim2.new(1 / n, -(2 * (n - 1)) / n, 1, 0), BackgroundTransparency = 1, Text = t, TextSize = 12,
-            Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0, LayoutOrder = i }, bar)
-        corner(b, 7)
-        b.Activated:Connect(function() onPick(i) end)
-        btns[i] = b
-    end
-    reg(function()
-        local cur = get()
-        for i, b in ipairs(btns) do
-            local on = (cur == i)
-            b.BackgroundTransparency = on and 0 or 1
-            b.BackgroundColor3 = TH.brand
-            b.TextColor3 = on and TH.dark or TH.mute
-        end
-    end)
-end
-
-function W.grid(parent, items)
-    local n, gap = #items, 8
-    local f = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
-    hlist(f, gap)
-    local vals = {}
-    for i, it in ipairs(items) do
-        local b = new("Frame", { Size = UDim2.new(1 / n, -gap * (n - 1) / n, 1, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 0.955,
-            BorderSizePixel = 0, LayoutOrder = i }, f)
-        corner(b, 10); stroke(b, WHITE, 1, 0.9)
-        vals[it[1]] = label(b, "--", 17, TH.bone, FD, { Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 9), TextXAlignment = CENTER })
-        label(b, it[2], 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 35), TextXAlignment = CENTER })
-    end
-    return vals
-end
-
-function W.meter(parent)
-    local m = new("Frame", { Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
-    corner(m, 3)
-    local f = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = TH.on, BorderSizePixel = 0 }, m)
-    corner(f, 3)
-    return function(pct, c)
-        tw(f, 0.3, { Size = UDim2.new(math.clamp(pct, 0, 100) / 100, 0, 1, 0), BackgroundColor3 = c })
-    end
-end
-
--- bagian yang bisa dilipat; mengembalikan wadah isi
 function W.section(parent, title, open)
     local c = W.card(parent)
     local hdr = new("TextButton", { Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, LayoutOrder = 1 }, c)
@@ -4723,7 +5004,6 @@ function W.section(parent, title, open)
     return body
 end
 
--- grafik batang riwayat
 function W.spark(parent, hist, maxv, colorFn, title, unit)
     local c = W.card(parent)
     local box = new("Frame", { Size = UDim2.new(1, 0, 0, 82), BackgroundTransparency = 1, LayoutOrder = nextLO() }, c)
@@ -4748,7 +5028,6 @@ function W.spark(parent, hist, maxv, colorFn, title, unit)
     end)
 end
 
--- banner status modul (muncul kalau modul belum siap)
 function W.banner(parent, key)
     local c = W.card(parent)
     local box = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c)
@@ -4765,8 +5044,6 @@ function W.banner(parent, key)
     end)
 end
 
--- slot profil kustom
-local PROF = { gym = 1, war = 1 }
 function W.slots(parent, which)
     local c = W.card(parent)
     local box = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c)
@@ -4793,25 +5070,52 @@ function W.slots(parent, which)
     end)
 end
 
-local function col(f) return f >= 55 and TH.on or (f >= 40 and TH.amb or TH.err) end
-local function colPing(p) return p < 90 and TH.on or (p < 160 and TH.amb or TH.err) end
-
 -- =====================================================================
---  ISI TAB
+--  BERANDA
 -- =====================================================================
--- ---------- Beranda ----------
 BT = "home"
 do
     local p = UI.panes.home
-    UI.hs = W.grid(p, { { "fps", "FPS" }, { "ping", "Ping (ms)" }, { "mem", "Memori (MB)" } })
+
+    -- dek kontrol: empat ubin daya
+    local deck = new("Frame", { Size = UDim2.new(1, 0, 0, 74), BackgroundTransparency = 1, LayoutOrder = nextLO() }, p)
+    hlist(deck, 8)
+    local function tileState(key, on, onTxt)
+        local m = MOD[key]
+        if m.state == "loading" then return "MEMUAT", TH.amb end
+        if m.state ~= "ready" then return "N/A", TH.err end
+        if on then return onTxt or "AKTIF", TH.on end
+        return "MATI", TH.mute
+    end
+    W.tile(deck, "GYM", function() return K.gymGet() end, function() return tileState("gym", K.gymGet() == true) end,
+        function() K.setGym(not K.gymGet()) end)
+    W.tile(deck, "PARRY", function() return K.warGet("parry") end, function() return tileState("war", K.warGet("parry") == true) end,
+        function() K.setWar("parry", not K.warGet("parry")) end)
+    W.tile(deck, "LOCK", function() return K.warGet("lock") end, function() return tileState("war", K.warGet("lock") == true) end,
+        function() K.setWar("lock", not K.warGet("lock")) end)
+    W.tile(deck, "LAG", function() return MOD.lag.state == "ready" and V.lag.applied end,
+        function() return tileState("lag", V.lag.applied, V.lag.running and "PROSES" or "AKTIF") end,
+        function() if V.lag.applied then K.lagRestore() else K.lagApply() end end)
+
+    -- kartu hero: gauge FPS + ping/memori/sesi
+    local hero = W.card(p)
+    local hb = new("Frame", { Size = UDim2.new(1, 0, 0, 124), BackgroundTransparency = 1, LayoutOrder = nextLO() }, hero)
+    local setGauge = W.gauge(hb, 104, 9, UDim2.fromOffset(2, 10))
+    local function statLine(y, cap)
+        label(hb, cap, 9, TH.mute, MONO, { Position = UDim2.fromOffset(130, y), Size = UDim2.new(1, -130, 0, 12) })
+        return label(hb, "--", 16, TH.bone, BLACK, { Position = UDim2.fromOffset(130, y + 12), Size = UDim2.new(1, -130, 0, 22) })
+    end
+    local sPing, sMem, sUp = statLine(12, "PING"), statLine(50, "MEMORI"), statLine(88, "SESI")
     reg(function()
         local f = V.sys.fps
-        UI.hs.fps.Text = tostring(f); UI.hs.fps.TextColor3 = col(f)
-        UI.hs.ping.Text = tostring(math.floor(V.sys.ping)); UI.hs.ping.TextColor3 = colPing(V.sys.ping)
-        UI.hs.mem.Text = tostring(math.floor(V.sys.mem))
+        setGauge(f / 120, col(f), tostring(f), "FPS")
+        sPing.Text = math.floor(V.sys.ping) .. " ms"; sPing.TextColor3 = colPing(V.sys.ping)
+        sMem.Text = math.floor(V.sys.mem) .. " MB"
+        sUp.Text = mmss(os.clock() - START)
     end)
-    W.spark(p, HIST.fps, 144, col, "FPS · 40 detik terakhir", "")
-    W.spark(p, HIST.ping, 300, colPing, "Ping · 40 detik terakhir", " ms")
+
+    W.spark(p, HIST.fps, 144, col, "FPS · 40 DETIK TERAKHIR", "")
+    W.spark(p, HIST.ping, 300, colPing, "PING · 40 DETIK TERAKHIR", " ms")
 
     local function dotOf(key, onFn)
         return function()
@@ -4835,26 +5139,17 @@ do
     do
         local row = W.row(c1, "Gym bot", stateSub("gym", function()
             return string.format("Level %s · %s", tostring(K.cget("gym", "Level") or "?"), K.gymGet() and "berjalan" or "mati")
-        end), true, 50, 16)
+        end), false, 0, 16)
         W.dot(row, dotOf("gym", function() return K.gymGet() end))
-        local paint = W.switch(row)
-        row.Activated:Connect(function() K.setGym(not K.gymGet()); paint(K.gymGet()) end)
-        reg(function() paint(K.gymGet()) end)
     end
-
-    local c2 = W.card(p)
     do
-        local row = W.row(c2, "Combat tools", stateSub("war", function()
+        local row = W.row(c1, "Combat tools", stateSub("war", function()
             return string.format("Parry %s · lock %s", K.warGet("parry") and "aktif" or "mati", K.warGet("lock") and "aktif" or "mati")
         end), false, 0, 16)
         W.dot(row, dotOf("war", function() return K.warGet("parry") or K.warGet("lock") end))
     end
-    W.toggle(c2, "Auto parry", nil, function() return K.warGet("parry") end, function() K.setWar("parry", not K.warGet("parry")) end)
-    W.toggle(c2, "Combat lock", nil, function() return K.warGet("lock") end, function() K.setWar("lock", not K.warGet("lock")) end)
-
-    local c3 = W.card(p)
     do
-        local row = W.btnRight(c3, "Anti-lag", stateSub("lag", function()
+        local row = W.btnRight(c1, "Anti-lag", stateSub("lag", function()
             if V.lag.running then return "Memproses " .. V.lag.prog .. "%" end
             if V.lag.applied then return "Aktif · " .. V.lag.hidden .. " part disembunyikan" end
             return "Belum diterapkan"
@@ -4868,10 +5163,10 @@ do
     local lh = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c4)
     padd(lh, 10, 0, 10, 0); vlist(lh, 6)
     local top = new("Frame", { Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, LayoutOrder = 1 }, lh)
-    label(top, "Aktivitas terakhir", 11, TH.mute, FS, { Size = UDim2.new(0.5, 0, 1, 0) })
+    label(top, "A K T I V I T A S", 10, TH.mute, MONO, { Size = UDim2.new(0.5, 0, 1, 0) })
     W.btn(top, "Salin laporan", "norm", K.copyReport, { Size = UDim2.fromOffset(0, 24), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, 0, 0, 0), TextSize = 11 })
-    UI.log = label(lh, "", 11.5, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, RichText = true, LayoutOrder = 2 })
+    UI.log = label(lh, "", 11.5, TH.mute, MONO, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, RichText = true, LayoutOrder = 2 })
     renderLog()
 end
 
@@ -5122,6 +5417,15 @@ do
         end)
     W.toggle(c1, "Animasi", "Transisi tab, toggle, dan notifikasi",
         function() return S.motion end, function() S.motion = not S.motion; K.saveSoon() end)
+    W.toggle(c1, "Efek visual", "Aurora, partikel, kilau judul, scanline, glitch",
+        function() return S.fx end, function() S.fx = not S.fx; K.saveSoon() end)
+    W.toggle(c1, "Layar pembuka", "Animasi boot saat hub dijalankan",
+        function() return S.intro end, function() S.intro = not S.intro; K.saveSoon() end)
+    do
+        local sp = new("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundTransparency = 1, LayoutOrder = nextLO() }, c1)
+        W.btn(c1, "Putar ulang intro", "norm", function() W.intro(true) end, { Size = UDim2.new(1, 0, 0, 32), LayoutOrder = nextLO(), TextSize = 12 })
+        local sp2 = new("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundTransparency = 1, LayoutOrder = nextLO() }, c1)
+    end
 
     W.heading(p, "Warna aksen")
     do
@@ -5136,7 +5440,7 @@ do
             local ring = stroke(b, WHITE, 2, 1)
             marks[i] = ring
             b.Activated:Connect(function()
-                S.accent = i; TH.brand = a[2]
+                S.accent = i; TH.brand = a[2]; TH.brand2 = hueShift(TH.brand, 0.1)
                 for _, f in ipairs(THF) do pcall(f) end
                 for _, r in ipairs(REF) do runR(r, true) end
                 renderLog(); K.saveSoon()
@@ -5222,16 +5526,18 @@ end
 BT = nil
 
 -- =====================================================================
---  TOMBOL BULAT, MODE RINGKAS, HOTKEY
+--  TOMBOL BULAT, MODE RINGKAS, HOTKEY, EFEK
 -- =====================================================================
-UI.fab = new("TextButton", { Name = "Fab", Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(12, 96), BackgroundTransparency = 1,
-    Text = "", AutoButtonColor = false, BorderSizePixel = 0, ZIndex = 5 }, ROOT)
+UI.fab = new("Frame", { Name = "Fab", Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(12, 96), BackgroundTransparency = 1,
+    BorderSizePixel = 0, ZIndex = 5, Active = true }, ROOT)
 do
     local fab = UI.fab
+    UI.fabHalo = new("Frame", { Size = UDim2.fromOffset(54, 54), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        BackgroundColor3 = TH.brand, BackgroundTransparency = 0.86, BorderSizePixel = 0 }, fab)
+    corner(UI.fabHalo, 27); onTheme(function() UI.fabHalo.BackgroundColor3 = TH.brand end)
     local base = new("Frame", { Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(3, 3), BackgroundTransparency = 1 }, fab)
     corner(base, 19); stroke(base, WHITE, 3, 0.84)
-    local seq = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.5, 0),
-        NumberSequenceKeypoint.new(0.501, 1), NumberSequenceKeypoint.new(1, 1) })
+    local seq = ns(0, 0, 0.5, 0, 0.501, 1, 1, 1)
     local function half(right)
         local clip = new("Frame", { Size = UDim2.fromOffset(22, 44), Position = UDim2.fromOffset(right and 22 or 0, 0), BackgroundTransparency = 1, ClipsDescendants = true }, fab)
         local circ = new("Frame", { Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(right and -19 or 3, 3), BackgroundTransparency = 1 }, clip)
@@ -5241,9 +5547,9 @@ do
         return new("UIGradient", { Transparency = seq, Rotation = right and 0 or 180 }, st)
     end
     local gR, gL = half(true), half(false)
-    local inner = new("Frame", { Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(5, 5), BackgroundColor3 = TH.ink, BackgroundTransparency = 0.12, BorderSizePixel = 0 }, fab)
+    local inner = new("Frame", { Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(5, 5), BackgroundColor3 = TH.ink, BackgroundTransparency = 0.05, BorderSizePixel = 0 }, fab)
     corner(inner, 17)
-    UI.fabTxt = label(inner, "SI", 14, TH.bone, FD, { Size = UDim2.new(1, 0, 1, 0), TextXAlignment = CENTER })
+    UI.fabTxt = label(inner, "SI", 14, TH.bone, BLACK, { Size = UDim2.new(1, 0, 1, 0), TextXAlignment = Enum.TextXAlignment.Center })
     function UI.setRing(p)
         local ang = math.clamp(p, 0, 1) * 360
         gR.Rotation = math.clamp(ang, 0, 180)
@@ -5253,26 +5559,39 @@ end
 
 function K.setOpen(o)
     OPEN = o
+    local p = UI.win.Position
     if o then
         UI.win.Visible = true
-        tw(UI.win, 0.16, { GroupTransparency = 0 })
+        if S.motion then
+            UI.win.GroupTransparency = 1
+            UI.win.Position = UDim2.fromOffset(p.X.Offset, p.Y.Offset + 14)
+            tw(UI.win, 0.22, { GroupTransparency = 0, Position = p })
+        else
+            UI.win.GroupTransparency = 0
+        end
         for _, r in ipairs(REF) do runR(r) end
     else
-        tw(UI.win, 0.16, { GroupTransparency = 1 })
-        task.delay(0.17, function() if not OPEN then UI.win.Visible = false end end)
+        tw(UI.win, 0.16, { GroupTransparency = 1, Position = UDim2.fromOffset(p.X.Offset, p.Y.Offset + 10) })
+        task.delay(0.18, function()
+            if not OPEN then UI.win.Visible = false; UI.win.Position = p end
+        end)
     end
 end
 
--- HUD mini: tiga toggle dan satu tombol anti-lag dalam satu strip
-UI.mini = new("Frame", { Name = "Mini", Size = UDim2.fromOffset(296, 38), Position = UDim2.fromOffset(64, 100), BackgroundColor3 = TH.ink,
-    BackgroundTransparency = 0.18, BorderSizePixel = 0, Visible = false, Active = true }, ROOT)
-corner(UI.mini, 12); stroke(UI.mini, WHITE, 1, 0.88)
+-- HUD mini: empat toggle dan satu tombol buka dalam satu strip
+UI.mini = new("Frame", { Name = "Mini", Size = UDim2.fromOffset(296, 38), Position = UDim2.fromOffset(64, 100), BackgroundColor3 = Color3.fromRGB(10, 8, 22),
+    BackgroundTransparency = 0.12, BorderSizePixel = 0, Visible = false, Active = true }, ROOT)
+corner(UI.mini, 12)
+UI.mgrad = new("UIGradient", {}, stroke(UI.mini, WHITE, 1.5, 0.1))
+onTheme(function()
+    UI.mgrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, TH.brand), ColorSequenceKeypoint.new(0.5, TH.brand2), ColorSequenceKeypoint.new(1, TH.brand) })
+end)
 do
     local specs = { { "GYM", "gym" }, { "PRY", "parry" }, { "LCK", "lock" }, { "LAG", "lag" } }
     local chips = {}
     for i, s in ipairs(specs) do
-        local b = new("TextButton", { Size = UDim2.fromOffset(46, 26), Position = UDim2.fromOffset(8 + (i - 1) * 50, 6), BackgroundColor3 = WHITE,
-            BackgroundTransparency = 0.92, Text = s[1], TextSize = 11, Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, UI.mini)
+        local b = new("TextButton", { Size = UDim2.fromOffset(46, 26), Position = UDim2.fromOffset(8 + (i - 1) * 50, 6), BackgroundColor3 = Color3.fromRGB(40, 36, 62),
+            BackgroundTransparency = 0.2, Text = s[1], TextSize = 11, Font = BLACK, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, UI.mini)
         corner(b, 8)
         b.Activated:Connect(function()
             if os.clock() - LASTDRAG < 0.25 then return end
@@ -5283,13 +5602,13 @@ do
         end)
         chips[s[2]] = b
     end
-    UI.mfps = label(UI.mini, "-- fps", 11, TH.on, FD, { Position = UDim2.fromOffset(212, 0), Size = UDim2.fromOffset(46, 38), TextXAlignment = CENTER })
+    UI.mfps = label(UI.mini, "-- fps", 11, TH.on, MONO, { Position = UDim2.fromOffset(212, 0), Size = UDim2.fromOffset(46, 38), TextXAlignment = Enum.TextXAlignment.Center })
     W.iconBtn(UI.mini, "expand", UDim2.fromOffset(260, 5), function() K.setMini(false); K.setOpen(true) end)
     reg(function()
         local st = { gym = K.gymGet() == true, parry = K.warGet("parry") == true, lock = K.warGet("lock") == true, lag = V.lag.applied and MOD.lag.state == "ready" }
         for k, b in pairs(chips) do
-            b.BackgroundColor3 = st[k] and TH.on or WHITE
-            b.BackgroundTransparency = st[k] and 0 or 0.92
+            b.BackgroundColor3 = st[k] and TH.on or Color3.fromRGB(40, 36, 62)
+            b.BackgroundTransparency = st[k] and 0 or 0.2
             b.TextColor3 = st[k] and TH.dark or TH.mute
         end
         UI.mfps.Text = V.sys.fps .. " fps"; UI.mfps.TextColor3 = col(V.sys.fps)
@@ -5362,21 +5681,49 @@ track(UIS.InputBegan:Connect(function(i, gp)
     end
 end))
 
--- header, cincin, dan label (selalu diperbarui, walau jendela tertutup)
+-- header, bar boss HP, cincin, dan label (selalu diperbarui, walau jendela tertutup)
 reg(function()
     local f = V.sys.fps
     UI.hfps.Text = f .. " fps"; UI.hfps.TextColor3 = col(f)
     local on = { K.gymGet() == true, (K.warGet("parry") == true) or (K.warGet("lock") == true), MOD.lag.state == "ready" and V.lag.applied }
     local n = 0
-    for i, s in ipairs(UI.segs) do
-        if on[i] then n = n + 1 end
-        s.BackgroundColor3 = on[i] and TH.brand or WHITE
-        s.BackgroundTransparency = on[i] and 0 or 0.88
-    end
-    UI.sub.Text = "By Duke · " .. n .. "/3 aktif"
+    for i = 1, 3 do if on[i] then n = n + 1 end end
+    UI.cap.Text = "BY DUKE · " .. n .. "/3 AKTIF"
+    UI.setHP(1 - n / 3)
+    UI.hpTxt.Text = (n == 3) and "K.O." or ("HP " .. math.floor((1 - n / 3) * 100 + 0.5) .. "%")
+    UI.hpTxt.TextColor3 = (n == 3) and TH.on or TH.brand
     UI.setRing(n / 3)
     UI.fabTxt.TextColor3 = (OPEN or MINI) and TH.brand or TH.bone
 end, true)
+
+-- loop efek visual: border berputar, kilau judul, aurora, partikel, scanline, glitch
+local FXT = { glitch = os.clock() + 4 }
+track(RunService.Heartbeat:Connect(function(dt)
+    if not S.fx then return end
+    local now = os.clock()
+    local t = now - START
+    local s = (math.sin(t * 2.4) + 1) / 2
+    UI.fabHalo.BackgroundTransparency = 0.88 - 0.1 * s
+    local z = 52 + 6 * s
+    UI.fabHalo.Size = UDim2.fromOffset(z, z)
+    if MINI then UI.mgrad.Rotation = (t * 40) % 360 end
+    if not OPEN then return end
+    UI.bgrad.Rotation = (t * 40) % 360
+    UI.tgrad.Offset = Vector2.new(((t * 0.35) % 2.4) - 1.2, 0)
+    for _, b in ipairs(UI.blobs) do
+        b.f.Position = UDim2.new(0.5 + 0.38 * math.sin(t * b.sp + b.ph), 0, 0.5 + 0.4 * math.cos(t * b.sp * 0.8 + b.ph), 0)
+    end
+    for i, p in ipairs(UI.parts) do
+        p.y = p.y - p.v * dt
+        if p.y < -0.03 then p.y = 1.03; p.x = math.random() end
+        p.f.Position = UDim2.new(p.x + 0.012 * math.sin(t + i), 0, p.y, 0)
+    end
+    UI.scan.Position = UDim2.new(0, 0, ((t * 0.18) % 1.5) - 0.25, 0)
+    if now > FXT.glitch then
+        FXT.glitch = now + 5 + math.random() * 5
+        UI.doGlitch()
+    end
+end))
 
 applyLayout()
 if S.wp then clampTo(UI.win, S.wp.x, S.wp.y) else clampTo(UI.win, (vp().X - WIN.w) / 2, 24) end
@@ -5389,7 +5736,7 @@ if workspace.CurrentCamera then
     end))
 end
 UI.ready = true
-if S.mini then K.setMini(true) end
+if S.mini then K.setMini(true) else W.intro() end
 
 -- =====================================================================
 --  JALANKAN
