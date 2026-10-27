@@ -1,5 +1,5 @@
 --[[
-  SKILL ISSUE FINAL BOSS  |  By Duke
+  SKILL ISSUE FINAL BOSS v1.1  |  By Duke
 
   Satu hub untuk tiga sistem:
     1. Gym bot       (auto gym, High School Anime)
@@ -10,12 +10,16 @@
   tidak ada satu baris pun yang diedit. Hub hanya:
     - menjalankan script aslinya lewat loadstring,
     - menekan tombol bawaan masing-masing (firesignal / getconnections),
-    - membaca label/teks UI bawaan buat status,
-    - mengisi tabel CFG yang sama (lewat getgc) buat slider dan opsi.
-  GUI bawaan masing-masing cuma disembunyikan tampilannya.
+    - membaca label/teks UI bawaan dan tabel internalnya buat status,
+    - mengisi tabel CFG yang sama (upvalue / getgc) buat slider dan opsi,
+    - meredam hotkey bawaan yang bentrok (Connection:Disable) dan menggantinya
+      dengan hotkey hub yang bisa diatur.
+  GUI bawaan masing-masing cuma disembunyikan tampilannya dan dikembalikan
+  saat hub ditutup.
 
-  Tombol bulat = buka/tutup | tarik header atau tombol bulat buat pindah
-  Hotkey buka/tutup hub: RightAlt
+  Tombol bulat: ketuk = buka/tutup | tahan = mode ringkas | tarik = pindah
+  Hotkey default: RightAlt hub | F1 gym | F2 parry | F3 lock | F4 anti-lag
+  Konfigurasi tersimpan di SIFB_config.json (jika executor punya writefile)
 ]]
 
 local SRC = {}
@@ -3225,10 +3229,13 @@ print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", 
 -- =====================================================================
 --  DASAR
 -- =====================================================================
+local VERSION = "1.1"
+
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
 local UIS          = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local HttpService  = game:GetService("HttpService")
 local Stats        = game:GetService("Stats")
 local okCG, CoreGui = pcall(function() return game:GetService("CoreGui") end)
 
@@ -3240,75 +3247,239 @@ if env.__SIFB_STOP then pcall(env.__SIFB_STOP) end
 local alive, conns = true, {}
 local function track(c) conns[#conns + 1] = c; return c end
 local ROOT
+
+local K  = {}   -- pengendali modul + aksi
+local W  = {}   -- pabrik widget
+local UI = {}   -- referensi widget
+
 env.__SIFB_STOP = function()
     alive = false
+    pcall(function() if K.saveNow and UI.ready then K.saveNow() end end)
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    pcall(function() K.restore() end)
     if ROOT then pcall(function() ROOT:Destroy() end) end
 end
 
-local HAS = { conn = type(getconnections) == "function", gc = type(getgc) == "function", clip = type(setclipboard) == "function" }
-
-local function fire(inst, sig)
-    local s = inst[sig]
-    if type(firesignal) == "function" then
-        if pcall(firesignal, s) then return true end
-    end
-    if HAS.conn then
-        local ok = pcall(function() for _, c in ipairs(getconnections(s)) do c:Fire() end end)
-        if ok then return true end
-    end
-    return false
-end
-
-local function kids(inst)
-    local ok, r = pcall(function() return inst:GetChildren() end)
-    return ok and r or {}
-end
+local CAP = {
+    loadstring     = type(loadstring) == "function",
+    getgc          = type(getgc) == "function",
+    getconnections = type(getconnections) == "function",
+    firesignal     = type(firesignal) == "function",
+    upvalues       = type(debug) == "table" and (type(debug.getupvalues) == "function" or type(debug.getupvalue) == "function"),
+    debuginfo      = type(debug) == "table" and type(debug.info) == "function",
+    file           = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function",
+    clipboard      = type(setclipboard) == "function",
+}
+local EXEC = "tidak diketahui"
+pcall(function()
+    local a, b = identifyexecutor()
+    EXEC = tostring(a) .. (b and (" " .. tostring(b)) or "")
+end)
 
 local WHITE = Color3.new(1, 1, 1)
+local ACCENTS = {
+    { "Crimson", Color3.fromRGB(255, 77, 94) },
+    { "Violet",  Color3.fromRGB(155, 123, 255) },
+    { "Cyan",    Color3.fromRGB(54, 209, 224) },
+    { "Amber",   Color3.fromRGB(255, 181, 71) },
+    { "Lime",    Color3.fromRGB(150, 224, 92) },
+}
 local TH = {
     ink   = Color3.fromRGB(14, 11, 26),
     bone  = Color3.fromRGB(241, 236, 227),
     mute  = Color3.fromRGB(160, 156, 182),
-    brand = Color3.fromRGB(255, 77, 94),
+    brand = ACCENTS[1][2],
     on    = Color3.fromRGB(92, 224, 176),
     amb   = Color3.fromRGB(255, 181, 71),
+    err   = Color3.fromRGB(255, 92, 105),
     dark  = Color3.fromRGB(26, 12, 16),
+    toast = Color3.fromRGB(34, 29, 56),
 }
 local FD, FB, FS = Enum.Font.GothamBold, Enum.Font.GothamMedium, Enum.Font.Gotham
 
-local UI = {}
+-- kunci CFG yang boleh disimpan/dimuat: n = angka, b = boolean, s = string
+local KEYS = {
+    gym = { Level = "n", AutoLevel = "b", AutoHit = "b", StopOnMax = "b", ExitOnMax = "b", AutoReenter = "b",
+        PressAt = "n", PullLead = "n", TapRate = "n", TapJitter = "n" },
+    war = { ParryWhileSwinging = "b", LearnFromOthers = "b", EcoSkipLow = "b", HoldRefresh = "b", GuardLog = "b",
+        MinSamples = "n", PredRefresh = "n", RefireGap = "n", HoldRagdoll = "n", HoldTail = "n", HoldUnknown = "n",
+        HoldHeavy = "n", EcoGuardLow = "n", RefreshMax = "n", RefreshMode = "s" },
+}
+local function typeOk(t, v)
+    return (t == "n" and type(v) == "number") or (t == "b" and type(v) == "boolean") or (t == "s" and type(v) == "string")
+end
+local function snapCfg(tbl, keys)
+    local out = {}
+    for k, t in pairs(keys) do
+        local v = rawget(tbl, k)
+        if typeOk(t, v) then out[k] = v end
+    end
+    return out
+end
+local function cleanCfg(src, keys)
+    local out = {}
+    if type(src) == "table" then
+        for k, t in pairs(keys) do
+            local v = src[k]
+            if typeOk(t, v) then out[k] = v end
+        end
+    end
+    return out
+end
+local function applyCfg(tbl, keys, src)
+    if type(src) ~= "table" then return end
+    for k, t in pairs(keys) do
+        local v = src[k]
+        if typeOk(t, v) and not (k == "RefreshMode" and v ~= "true" and v ~= "cycle") then tbl[k] = v end
+    end
+end
 
--- ---------- log dan toast ----------
+-- ---------- pengaturan hub (tersimpan) ----------
+local CFGFILE = "SIFB_config.json"
+local S = {
+    op = 74, sc = 100, accent = 1, motion = true, mute = true, leafGuard = true, autosave = true, fast = false,
+    mini = false,
+    hk = { hub = "RightAlt", gym = "F1", parry = "F2", lock = "F3", lag = "F4" },
+    wp = nil, fp = nil, mp = nil,
+    gym = {}, war = {}, slots = { gym = {}, war = {} },
+}
+local DIRTY = false
+
+local function loadSettings()
+    if not CAP.file then return end
+    local ok, d = pcall(function()
+        if not isfile(CFGFILE) then return nil end
+        return HttpService:JSONDecode(readfile(CFGFILE))
+    end)
+    if not ok or type(d) ~= "table" then return end
+    local function num(k, lo, hi) if type(d[k]) == "number" then S[k] = math.clamp(d[k], lo, hi) end end
+    local function bool(k) if type(d[k]) == "boolean" then S[k] = d[k] end end
+    num("op", 30, 95); num("sc", 70, 130); num("accent", 1, #ACCENTS)
+    S.accent = math.floor(S.accent)
+    bool("motion"); bool("mute"); bool("leafGuard"); bool("autosave"); bool("fast"); bool("mini")
+    if type(d.hk) == "table" then
+        for k, v in pairs(d.hk) do
+            if S.hk[k] and type(v) == "string" then
+                local okk, kc = pcall(function() return Enum.KeyCode[v] end)
+                if okk and kc then S.hk[k] = v end
+            end
+        end
+    end
+    for _, k in ipairs({ "wp", "fp", "mp" }) do
+        local p = d[k]
+        if type(p) == "table" and tonumber(p.x) and tonumber(p.y) then S[k] = { x = tonumber(p.x), y = tonumber(p.y) } end
+    end
+    S.gym = cleanCfg(d.gym, KEYS.gym)
+    S.war = cleanCfg(d.war, KEYS.war)
+    if type(d.slots) == "table" then
+        for _, g in ipairs({ "gym", "war" }) do
+            local sl = type(d.slots[g]) == "table" and d.slots[g] or {}
+            for _, i in ipairs({ "1", "2", "3" }) do
+                if type(sl[i]) == "table" then S.slots[g][i] = cleanCfg(sl[i], KEYS[g]) end
+            end
+        end
+    end
+end
+loadSettings()
+TH.brand = ACCENTS[S.accent][2]
+
+-- =====================================================================
+--  LOG DAN TOAST
+-- =====================================================================
 local LOGS = {}
 local function hex(c)
     return string.format("#%02x%02x%02x", math.floor(c.R * 255 + .5), math.floor(c.G * 255 + .5), math.floor(c.B * 255 + .5))
 end
+local function esc(s) return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
 local function renderLog()
     if not UI.log then return end
     local out = {}
-    for i, l in ipairs(LOGS) do out[i] = '<font color="' .. hex(TH.amb) .. '">' .. l.t .. '</font>  ' .. l.m end
+    for i = 1, math.min(#LOGS, 6) do
+        local l = LOGS[i]
+        local c = (l.k == "ok" and TH.on) or (l.k == "warn" and TH.amb) or (l.k == "err" and TH.err) or TH.mute
+        out[i] = '<font color="' .. hex(c) .. '">' .. l.t .. '</font>  ' .. esc(l.m)
+    end
     UI.log.Text = table.concat(out, "\n")
 end
-local function log(m)
-    table.insert(LOGS, 1, { t = os.date("%H:%M:%S"), m = m })
-    while #LOGS > 5 do table.remove(LOGS) end
+local function log(m, kind)
+    table.insert(LOGS, 1, { t = os.date("%H:%M:%S"), m = tostring(m), k = kind or "info" })
+    while #LOGS > 40 do table.remove(LOGS) end
     renderLog()
 end
-local toastTok = 0
-local function toast(m)
-    if not UI.toast then return end
-    toastTok = toastTok + 1
-    local my = toastTok
-    UI.toast.Text = m
-    UI.toast.Visible = true
-    task.delay(2.4, function()
-        if my == toastTok and UI.toast then UI.toast.Visible = false end
-    end)
+
+local function tw(obj, t, props)
+    if S.motion then
+        TweenService:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+    else
+        for k, v in pairs(props) do pcall(function() obj[k] = v end) end
+    end
 end
 
+local LO = 0
+local function nextLO() LO = LO + 1; return LO end
+local function new(cls, props, parent)
+    local o = Instance.new(cls)
+    for k, v in pairs(props) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
+local function stroke(o, c, t, tr)
+    return new("UIStroke", { Color = c, Thickness = t, Transparency = tr, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
+end
+local function padd(o, t, r, b, l)
+    return new("UIPadding", { PaddingTop = UDim.new(0, t), PaddingRight = UDim.new(0, r), PaddingBottom = UDim.new(0, b), PaddingLeft = UDim.new(0, l) }, o)
+end
+local function vlist(o, gap, ha)
+    local l = new("UIListLayout", { Padding = UDim.new(0, gap), SortOrder = Enum.SortOrder.LayoutOrder }, o)
+    if ha then l.HorizontalAlignment = ha end
+    return l
+end
+local function hlist(o, gap, va)
+    local l = new("UIListLayout", { Padding = UDim.new(0, gap), FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder }, o)
+    if va then l.VerticalAlignment = va end
+    return l
+end
+local function label(parent, txt, size, col, font, props)
+    local p = { Text = txt, TextSize = size, TextColor3 = col, Font = font or FB, BackgroundTransparency = 1,
+        BorderSizePixel = 0, TextXAlignment = Enum.TextXAlignment.Left }
+    for k, v in pairs(props or {}) do p[k] = v end
+    return new("TextLabel", p, parent)
+end
+local CENTER = Enum.TextXAlignment.Center
+local AUTO_Y, AUTO_X, AUTO_XY = Enum.AutomaticSize.Y, Enum.AutomaticSize.X, Enum.AutomaticSize.XY
+
+local TOAST_KIND = { ok = "on", warn = "amb", err = "err" }
+local function toast(msg, kind)
+    if not UI.toasts then return end
+    local col = TH[TOAST_KIND[kind or ""] or "mute"]
+    local f = new("Frame", { Size = UDim2.fromOffset(0, 32), AutomaticSize = AUTO_XY, BackgroundColor3 = TH.toast,
+        BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = nextLO() }, UI.toasts)
+    corner(f, 9)
+    local st = stroke(f, col, 1, 1)
+    padd(f, 6, 12, 6, 16)
+    local bar = new("Frame", { Size = UDim2.new(0, 3, 1, 0), Position = UDim2.new(0, -10, 0, 0), BackgroundColor3 = col,
+        BackgroundTransparency = 1, BorderSizePixel = 0 }, f)
+    corner(bar, 2)
+    local tl = label(f, tostring(msg), 12, TH.bone, FB, { Size = UDim2.fromOffset(0, 20), AutomaticSize = AUTO_XY,
+        TextWrapped = true, TextTransparency = 1 })
+    new("UISizeConstraint", { MaxSize = Vector2.new(300, 120) }, tl)
+    tw(f, 0.18, { BackgroundTransparency = 0.04 }); tw(st, 0.18, { Transparency = 0.45 })
+    tw(bar, 0.18, { BackgroundTransparency = 0 }); tw(tl, 0.18, { TextTransparency = 0 })
+    local list = {}
+    for _, c in ipairs(UI.toasts:GetChildren()) do if c:IsA("Frame") then list[#list + 1] = c end end
+    if #list > 3 then list[1]:Destroy() end
+    task.delay(2.8, function()
+        if not f.Parent then return end
+        tw(f, 0.2, { BackgroundTransparency = 1 }); tw(st, 0.2, { Transparency = 1 })
+        tw(bar, 0.2, { BackgroundTransparency = 1 }); tw(tl, 0.2, { TextTransparency = 1 })
+        task.delay(0.25, function() if f.Parent then f:Destroy() end end)
+    end)
+end
+local function say(kind, msg) log(msg, kind); toast(msg, kind) end
+
 -- =====================================================================
---  MODUL: status, loader, dan pengendali tiga sistem asli
+--  STATUS MODUL
 -- =====================================================================
 local V = {
     sys = { fps = 60, ping = 0, mem = 0 },
@@ -3317,18 +3488,19 @@ local V = {
     lag = { statusTxt = "", running = false, applied = false, before = nil, after = nil, hidden = 0, prog = 0 },
 }
 local MOD = {
-    gym = { label = "Gym bot", state = "loading", t0 = os.clock(), wait = 36,
+    gym = { label = "Gym bot", state = "loading", t0 = os.clock(), wait = 8,
         note = "GymMinigameGui tidak ditemukan (modul ini khusus High School Anime)" },
-    war = { label = "Combat tools", state = "loading", t0 = os.clock(), wait = 18,
+    war = { label = "Combat tools", state = "loading", t0 = os.clock(), wait = 8,
         note = "CombatRemotes tidak ditemukan (modul ini khusus High School Anime)" },
-    lag = { label = "Anti-lag", state = "loading", t0 = os.clock(), wait = 8,
+    lag = { label = "Anti-lag", state = "loading", t0 = os.clock(), wait = 6,
         note = "Anti-lag gagal dimuat", ended = {} },
 }
-local GY, WR, LG, CFGT = {}, {}, { sl = {}, tg = {} }, {}
-local FAST = { on = false, orig = nil }
+local GY, WR, LG, WI, CFGT = {}, {}, { sl = {}, tg = {} }, {}, {}
+local FAST, APPLIED, OPT, MUTED = { on = false, orig = nil, tried = false }, {}, {}, {}
+local SCAN = { busy = false, last = 0 }
+local HIST = { fps = {}, ping = {} }
+for i = 1, 40 do HIST.fps[i] = 0; HIST.ping[i] = 0 end
 
--- pembaruan optimistis biar tombol terasa langsung (teks asli baru update ~0.25 dtk kemudian)
-local OPT = {}
 local function opt(k, v) OPT[k] = { v = v, t = os.clock() } end
 local function optGet(k, real)
     local o = OPT[k]
@@ -3336,74 +3508,171 @@ local function optGet(k, real)
     return real
 end
 
-local function snap(sig)
+-- =====================================================================
+--  SIMPAN / MUAT
+-- =====================================================================
+function K.saveSoon() DIRTY = true end
+function K.saveNow()
+    DIRTY = false
+    if not CAP.file then return end
+    if CFGT.gym then S.gym = snapCfg(CFGT.gym, KEYS.gym) end
+    if CFGT.war then S.war = snapCfg(CFGT.war, KEYS.war) end
+    S.fast = FAST.on or (S.fast and not FAST.tried and not CFGT.game)
+    local ok, js = pcall(HttpService.JSONEncode, HttpService, S)
+    if ok then pcall(writefile, CFGFILE, js) end
+end
+
+-- =====================================================================
+--  KONEKSI, HOTKEY, SCAN
+-- =====================================================================
+function K.conList(sig)
+    local out = {}
+    if not CAP.getconnections then return out end
+    local ok, list = pcall(getconnections, sig)
+    if not ok or type(list) ~= "table" then return out end
+    for _, c in ipairs(list) do
+        local f
+        pcall(function() f = c.Function end)
+        out[#out + 1] = { c = c, f = f }
+    end
+    return out
+end
+function K.snap(sig)
     local t = {}
-    if not HAS.conn then return nil end
-    pcall(function() for _, c in ipairs(getconnections(sig)) do local f = c.Function; if f then t[f] = true end end end)
+    for _, it in ipairs(K.conList(sig)) do if it.f then t[it.f] = true end end
     return t
 end
-local function diff(sig, before)
+function K.diff(sig, before)
     local out = {}
-    if not before then return out end
-    pcall(function()
-        for _, c in ipairs(getconnections(sig)) do
-            local f = c.Function
-            if f and not before[f] then out[#out + 1] = c end
+    for _, it in ipairs(K.conList(sig)) do
+        if it.f and not before[it.f] then out[#out + 1] = it.c end
+    end
+    return out
+end
+function K.srcOf(f)
+    if not CAP.debuginfo or not f then return nil end
+    local ok, s = pcall(debug.info, f, "s")
+    if ok and type(s) == "string" then return s end
+    return nil
+end
+-- redam handler UIS.InputBegan milik modul tertentu (dikenali dari chunkname SIFB_<key>)
+function K.muteKeys(key)
+    if not S.mute or not CAP.getconnections then return 0 end
+    local n = 0
+    for _, it in ipairs(K.conList(UIS.InputBegan)) do
+        local s = K.srcOf(it.f)
+        if s and s:find("SIFB_" .. key, 1, true) then
+            local c = it.c
+            if pcall(function() c:Disable() end) then MUTED[#MUTED + 1] = c; n = n + 1 end
         end
-    end)
+    end
+    if n > 0 then log("Hotkey bawaan " .. MOD[key].label .. " diredam (" .. n .. ")", "ok") end
+    return n
+end
+function K.unmuteAll()
+    for _, c in ipairs(MUTED) do pcall(function() c:Enable() end) end
+    MUTED = {}
+end
+
+function K.getUps(f)
+    local out = {}
+    if not CAP.upvalues or type(f) ~= "function" then return out end
+    if type(debug.getupvalues) == "function" then
+        local ok, t = pcall(debug.getupvalues, f)
+        if ok and type(t) == "table" then
+            for _, v in pairs(t) do out[#out + 1] = v end
+            return out
+        end
+    end
+    if type(debug.getupvalue) == "function" then
+        for i = 1, 60 do
+            local ok, a, b = pcall(debug.getupvalue, f, i)
+            if not ok or (a == nil and b == nil) then break end
+            if type(a) == "string" and b ~= nil then out[#out + 1] = b else out[#out + 1] = a end
+        end
+    end
     return out
 end
 
-local function loadMod(key)
-    local m = MOD[key]
-    m.state, m.t0, m.err = "loading", os.clock(), nil
-    local ld = loadstring or load
-    if not ld then m.state, m.err = "missing", "executor tidak punya loadstring"; return end
-    local fn, err = ld(SRC[key], "=SIFB_" .. key)
-    if not fn then m.state, m.err = "missing", tostring(err); return end
-    if key == "lag" then
-        local before = snap(UIS.InputEnded)
-        local ok, e = pcall(fn)
-        if not ok then m.state, m.err = "missing", tostring(e); return end
-        m.ended = diff(UIS.InputEnded, before)
-    else
-        task.spawn(function()
-            local ok, e = pcall(fn)
-            if not ok then m.state, m.err = "missing", tostring(e) end
-        end)
-    end
-end
-
--- cari tabel CFG milik script asli (cara yang sama dengan FAST di script gym)
-local function scanCfg()
-    if not HAS.gc then return end
-    local okk, list = pcall(getgc, true)
-    if not okk or type(list) ~= "table" then return end
-    pcall(function()
-        for _, t in ipairs(list) do
-            if type(t) == "table" then
-                if not CFGT.gym and rawget(t, "AutoReenter") ~= nil and rawget(t, "TapJitter") ~= nil then
-                    CFGT.gym = t
-                elseif not CFGT.war and rawget(t, "ParryWhileSwinging") ~= nil and rawget(t, "RefreshMax") ~= nil then
-                    CFGT.war = t
-                elseif not CFGT.game and rawget(t, "GymFolderName") ~= nil and rawget(t, "LeadIn") ~= nil then
-                    CFGT.game = t
+-- ambil CFG, Lead, HD, Stat Wraith lewat upvalue WRAITH_DUMP (tepat, tanpa getgc)
+function K.warInternals()
+    local f = env.WRAITH_DUMP
+    if type(f) ~= "function" then return end
+    local unk = {}
+    for _, v in ipairs(K.getUps(f)) do
+        if type(v) == "table" then
+            if rawget(v, "ParryWhileSwinging") ~= nil then
+                CFGT.war = v
+            elseif type(rawget(v, "pick")) == "function" and type(rawget(v, "a")) == "table" then
+                WI.lead = v
+            elseif type(rawget(v, "ok")) == "number" and type(rawget(v, "fail")) == "number" then
+                WI.stat = v
+            else
+                local k, e = next(v)
+                if type(k) == "string" and type(e) == "table" and type(e.d) == "number" and type(e.n) == "number" then
+                    WI.hd = v
+                else
+                    unk[#unk + 1] = v
                 end
-                if CFGT.gym and CFGT.war and CFGT.game then break end
             end
         end
+    end
+    if not WI.hd and #unk == 1 then WI.hd = unk[1] end
+end
+
+function K.onCfgFound(which)
+    if APPLIED[which] or not CFGT[which] then return end
+    APPLIED[which] = true
+    applyCfg(CFGT[which], KEYS[which], S[which])
+    log("Konfigurasi " .. which .. " diterapkan", "ok")
+end
+
+function K.scanAsync()
+    if SCAN.busy or not CAP.getgc then return end
+    SCAN.busy = true
+    task.spawn(function()
+        local ok, list = pcall(getgc, true)
+        if ok and type(list) == "table" then
+            for i = 1, #list do
+                local t = list[i]
+                if type(t) == "table" then
+                    pcall(function()
+                        if not CFGT.gym and rawget(t, "AutoReenter") ~= nil and rawget(t, "TapJitter") ~= nil then
+                            CFGT.gym = t
+                        elseif not CFGT.war and rawget(t, "ParryWhileSwinging") ~= nil and rawget(t, "RefreshMax") ~= nil then
+                            CFGT.war = t
+                        elseif not CFGT.game and rawget(t, "GymFolderName") ~= nil and rawget(t, "LeadIn") ~= nil then
+                            CFGT.game = t
+                        end
+                    end)
+                end
+                if i % 4000 == 0 then task.wait() end
+            end
+        end
+        SCAN.busy, SCAN.last = false, os.clock()
+        if CFGT.gym then K.onCfgFound("gym") end
+        if CFGT.war then K.onCfgFound("war") end
     end)
 end
-local function cget(which, field)
+
+function K.ensureCfg(which)
+    if CFGT[which] then K.onCfgFound(which); return true end
+    if which == "war" then K.warInternals() end
+    if CFGT[which] then K.onCfgFound(which); return true end
+    if CAP.getgc and not SCAN.busy and os.clock() - SCAN.last > 4 then K.scanAsync() end
+    return false
+end
+function K.cget(which, field)
     local t = CFGT[which]
     if t then return rawget(t, field) end
 end
 
 -- FAST: script gym cuma menerapkannya sekali pas start, jadi hub yang menerapkan/mengembalikan
-local function setFast(v)
+function K.setFast(v, quiet)
     local gt, cfg = CFGT.game, CFGT.gym
     if not gt or not cfg or type(cfg.FastValues) ~= "table" then
-        toast("Fast mode butuh getgc dan modul gym aktif"); return
+        if not quiet then toast("Fast mode butuh getgc dan modul gym aktif", "warn") end
+        return
     end
     if v and not FAST.on then
         FAST.orig = {}
@@ -3413,10 +3682,63 @@ local function setFast(v)
         for k, val in pairs(FAST.orig or {}) do gt[k] = val end
         FAST.on = false
     end
+    S.fast = FAST.on
+    K.saveSoon()
 end
 
--- ---------- Gym ----------
-local function findGymBtn()
+-- =====================================================================
+--  LOADER
+-- =====================================================================
+function K.loadMod(key)
+    local m = MOD[key]
+    m.state, m.t0, m.err = "loading", os.clock(), nil
+    local ld = loadstring or load
+    if not ld then m.state, m.err = "missing", "executor tidak punya loadstring"; return end
+    local fn, err = ld(SRC[key], "=SIFB_" .. key)
+    if not fn then m.state, m.err = "missing", tostring(err); return end
+    if key == "lag" then
+        local before = K.snap(UIS.InputEnded)
+        local ok, e = pcall(fn)
+        if not ok then m.state, m.err = "missing", tostring(e); return end
+        m.ended = K.diff(UIS.InputEnded, before)
+    else
+        task.spawn(function()
+            local ok, e = pcall(fn)
+            if not ok then m.state, m.err = "missing", tostring(e) end
+        end)
+    end
+end
+
+function K.reattach(key)
+    local m = MOD[key]
+    m.state, m.t0, m.err = "loading", os.clock(), nil
+    if key == "gym" then GY = {}; CFGT.gym = nil; CFGT.game = nil; APPLIED.gym = nil; FAST.on = false; FAST.tried = false
+    elseif key == "war" then WR = {}; CFGT.war = nil; WI = {}; APPLIED.war = nil
+    else LG = { sl = {}, tg = {} } end
+    log(m.label .. ": menghubungkan ulang…", "warn")
+end
+
+function K.revive(key)
+    local m = MOD[key]
+    if key == "gym" then
+        if K.findGymBtn() then K.reattach("gym") else K.reattach("gym"); K.loadMod("gym") end
+    elseif key == "war" then
+        if env.__WRAITH12 then K.reattach("war") else K.reattach("war"); K.loadMod("war") end
+        if env.__WRAITH12 and m.err then toast("Wraith tidak bisa dimuat ulang. Rejoin lalu jalankan lagi", "warn") end
+    else
+        K.reattach("lag"); K.loadMod("lag")
+    end
+end
+
+-- =====================================================================
+--  GYM
+-- =====================================================================
+local function kids(inst)
+    local ok, r = pcall(function() return inst:GetChildren() end)
+    return ok and r or {}
+end
+
+function K.findGymBtn()
     local roots = {}
     if type(gethui) == "function" then
         local ok, h = pcall(gethui)
@@ -3435,49 +3757,62 @@ local function findGymBtn()
     end
 end
 
-local function hookGymToast()
+local TOASTCONN
+function K.hookGymToast()
     local gui = PGui:FindFirstChild("GymMinigameGui")
     local t = gui and gui:FindFirstChild("GainToast")
     if not t then return end
     local ok, sig = pcall(function() return t:GetPropertyChangedSignal("Text") end)
     if not ok then return end
-    track(sig:Connect(function()
+    if TOASTCONN then pcall(function() TOASTCONN:Disconnect() end) end
+    TOASTCONN = track(sig:Connect(function()
         local tx = tostring(t.Text)
         if tx:find("SUDAH MAKSIMAL", 1, true) then
             V.gym.maxed = true
-            log("Stat sudah maksimal, gym bot berhenti")
-            toast("Stat sudah maksimal, gym bot berhenti")
+            say("ok", "Stat sudah maksimal, gym bot berhenti")
         elseif tx ~= "" then
             V.gym.gains = V.gym.gains + 1
         end
     end))
 end
 
-local function pollGym()
+function K.pollGym()
     local m = MOD.gym
     if m.state ~= "ready" then
-        local btn = findGymBtn()
+        local btn = K.findGymBtn()
         if btn then
             GY.btn = btn
             m.state, m.err = "ready", nil
             pcall(function() btn.Visible = false end)
-            if btn.Text:find(": ON", 1, true) then fire(btn, "Activated"); opt("gym", false) end
-            scanCfg(); hookGymToast()
-            log("Gym bot terhubung")
-        elseif os.clock() - m.t0 > m.wait and m.state == "loading" then
+            if btn.Text:find(": ON", 1, true) then K.fireSig(btn, "Activated"); opt("gym", false) end
+            GY.prevOn = false
+            K.hookGymToast()
+            K.muteKeys("gym")
+            K.ensureCfg("gym")
+            log("Gym bot terhubung", "ok")
+        elseif m.state == "loading" and os.clock() - m.t0 > m.wait then
             m.state = "missing"
         end
         return
     end
     if not GY.btn or not GY.btn.Parent then m.state = "missing"; m.err = "gym bot berhenti"; return end
     if GY.btn.Visible then GY.btn.Visible = false end
-    V.gym.on = GY.btn.Text:find(": ON", 1, true) ~= nil
+    local on = GY.btn.Text:find(": ON", 1, true) ~= nil
+    if on and not GY.prevOn then V.gym.maxed = false end
+    GY.prevOn, V.gym.on = on, on
     local ch = LP.Character
     V.gym.gymming = ch ~= nil and ch:GetAttribute("IsGymming") == true
+    if not CFGT.gym then K.ensureCfg("gym") end
+    if S.fast and not FAST.on and not FAST.tried and CFGT.gym and CFGT.game then
+        FAST.tried = true
+        K.setFast(true, true)
+    end
 end
 
--- ---------- Combat (Wraith) ----------
-local function pollWar()
+-- =====================================================================
+--  COMBAT (WRAITH)
+-- =====================================================================
+function K.pollWar()
     local m = MOD.war
     if m.state ~= "ready" then
         local sg = PGui:FindFirstChild("WRAITH_UI")
@@ -3496,11 +3831,13 @@ local function pollWar()
                     WR.sg, WR.pill, WR.panel, WR.pc, WR.lc, WR.info = sg, pill, panel, pc, lc, info
                     m.state, m.err = "ready", nil
                     sg.Enabled = false
-                    scanCfg()
-                    log("Combat tools terhubung")
+                    K.warInternals()
+                    K.muteKeys("war")
+                    K.ensureCfg("war")
+                    log("Combat tools terhubung", "ok")
                 end
             end
-        elseif os.clock() - m.t0 > m.wait and m.state == "loading" then
+        elseif m.state == "loading" and os.clock() - m.t0 > m.wait then
             m.state = "missing"
         end
         return
@@ -3510,7 +3847,7 @@ local function pollWar()
     -- teks tombol dan label cuma diperbarui script asli kalau panelnya terbuka
     if not WR.panel.Visible and os.clock() - (WR.lastOpen or 0) > 1 then
         WR.lastOpen = os.clock()
-        fire(WR.pill, "MouseButton1Click")
+        K.fireSig(WR.pill, "MouseButton1Click")
     end
     V.war.parry = not WR.pc.Text:find("OFF", 1, true)
     V.war.lockTxt = WR.lc.Text
@@ -3519,9 +3856,12 @@ local function pollWar()
     if a then
         V.war.ping, V.war.p, V.war.m, V.war.l, V.war.w = tonumber(a), tonumber(p), tonumber(mm), tonumber(l), tonumber(w)
     end
+    if not CFGT.war then K.ensureCfg("war") end
 end
 
--- ---------- Anti-lag (Nono) ----------
+-- =====================================================================
+--  ANTI-LAG (NONO)
+-- =====================================================================
 local LAG_TOGGLES = { "Nuke Texture", "Kill Shadow", "Kill Post FX", "Hide Leaves", "Kill FX",
     "Anchor Parts", "Kill Skybox", "Aggressive", "Adaptive FPS", "Auto Apply" }
 
@@ -3532,7 +3872,7 @@ local function sib(lbl)
     end
 end
 
-local function attachLag()
+function K.attachLag()
     local sg = PGui:FindFirstChild("NonoAntiLag")
     local main = sg and sg:FindFirstChild("Main")
     local wrap = main and main:FindFirstChild("BodyWrapper")
@@ -3545,6 +3885,7 @@ local function attachLag()
     local apply = scroll:FindFirstChildWhichIsA("TextButton")
     if not (apply and txt["STATUS"] and txt["BEFORE"]) then return false end
     LG.sg, LG.main, LG.scroll, LG.apply, LG.txt = sg, main, scroll, apply, txt
+    LG.origPos = main.Position
     LG.status, LG.hidden = sib(txt["STATUS"]), sib(txt["Hidden"])
     LG.before, LG.after = sib(txt["BEFORE"]), sib(txt["AFTER"])
     LG.restore, LG.unload, LG.logLbl = nil, nil, nil
@@ -3585,15 +3926,20 @@ local function attachLag()
     return true
 end
 
-local function pollLag()
+function K.pollLag()
     local m = MOD.lag
     if m.state == "gone" then return end
     if m.state ~= "ready" then
-        if attachLag() then
+        if K.attachLag() then
             m.state, m.err = "ready", nil
-            log("Anti-lag terhubung")
-            if LG.pending then LG.pending = nil; fire(LG.apply, "MouseButton1Click") end
-        elseif os.clock() - m.t0 > m.wait and m.state == "loading" then
+            K.muteKeys("lag")
+            log("Anti-lag terhubung", "ok")
+            if S.leafGuard and K.lagTgGet("Hide Leaves") then
+                K.lagTgFlip("Hide Leaves")
+                log("Hide Leaves dimatikan otomatis (risiko tembus lantai)", "warn")
+            end
+            if LG.pending then LG.pending = nil; K.fireSig(LG.apply, "MouseButton1Click") end
+        elseif m.state == "loading" and os.clock() - m.t0 > m.wait then
             m.state = "missing"
         end
         return
@@ -3619,11 +3965,16 @@ local function pollLag()
     V.lag.hidden = tonumber((LG.hidden and LG.hidden.Text or ""):match("(%d+)")) or 0
 end
 
-local function pollSys()
+-- =====================================================================
+--  SISTEM
+-- =====================================================================
+function K.pollSys()
     local ok, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
     V.sys.ping = ok and ping or 0
     local ok2, mem = pcall(function() return Stats:GetTotalMemoryUsageMb() end)
     V.sys.mem = ok2 and mem or 0
+    table.remove(HIST.fps, 1); HIST.fps[#HIST.fps + 1] = V.sys.fps
+    table.remove(HIST.ping, 1); HIST.ping[#HIST.ping + 1] = math.floor(V.sys.ping)
 end
 
 local fpsAcc, fpsN = 0, 0
@@ -3632,73 +3983,93 @@ track(RunService.RenderStepped:Connect(function(dt)
     if fpsAcc >= 0.5 then V.sys.fps = math.floor(fpsN / fpsAcc + 0.5); fpsAcc, fpsN = 0, 0 end
 end))
 
--- ---------- aksi ----------
-local function ready(m)
-    if m.state == "ready" then return true end
-    toast(m.label .. ": " .. (m.err or (m.state == "loading" and "masih memuat" or m.note)))
+function K.fireSig(inst, sig)
+    local s = inst[sig]
+    if CAP.firesignal then
+        if pcall(firesignal, s) then return true end
+    end
+    if CAP.getconnections then
+        local ok = pcall(function() for _, c in ipairs(getconnections(s)) do c:Fire() end end)
+        if ok then return true end
+    end
     return false
 end
-local function gymGet() if MOD.gym.state ~= "ready" then return nil end return optGet("gym", V.gym.on) end
-local function warGet(k) if MOD.war.state ~= "ready" then return nil end return optGet(k, V.war[k]) end
 
-local function setGym(v)
-    if not ready(MOD.gym) then return end
-    if gymGet() == v then return end
-    fire(GY.btn, "Activated"); opt("gym", v)
+-- =====================================================================
+--  AKSI
+-- =====================================================================
+function K.ready(m)
+    if m.state == "ready" then return true end
+    toast(m.label .. ": " .. K.modNote(m), "warn")
+    return false
+end
+function K.modNote(m)
+    if m.state == "ready" then return "" end
+    if m.state == "loading" then return "Memuat modul…" end
+    if m.state == "gone" then return "Anti-lag dilepas. Hubungkan ulang untuk memuat lagi." end
+    return m.err or m.note
+end
+function K.gymGet() if MOD.gym.state ~= "ready" then return nil end return optGet("gym", V.gym.on) end
+function K.warGet(k) if MOD.war.state ~= "ready" then return nil end return optGet(k, V.war[k]) end
+
+function K.setGym(v)
+    if not K.ready(MOD.gym) then return end
+    if K.gymGet() == v then return end
+    K.fireSig(GY.btn, "Activated"); opt("gym", v)
     if v then V.gym.maxed = false end
-    log("Gym bot " .. (v and "dinyalakan" or "dimatikan"))
+    log("Gym bot " .. (v and "dinyalakan" or "dimatikan"), v and "ok" or "info")
 end
-local function setWar(k, v)
-    if not ready(MOD.war) then return end
-    if warGet(k) == v then return end
-    fire(k == "parry" and WR.pc or WR.lc, "MouseButton1Click"); opt(k, v)
-    log((k == "parry" and "Auto parry" or "Combat lock") .. (v and " dinyalakan" or " dimatikan"))
+function K.setWar(k, v)
+    if not K.ready(MOD.war) then return end
+    if K.warGet(k) == v then return end
+    K.fireSig(k == "parry" and WR.pc or WR.lc, "MouseButton1Click"); opt(k, v)
+    log((k == "parry" and "Auto parry" or "Combat lock") .. (v and " dinyalakan" or " dimatikan"), v and "ok" or "info")
 end
-local function lagApply()
+function K.lagApply()
     local m = MOD.lag
     if m.state == "gone" or m.state == "missing" then
-        LG.pending = true; loadMod("lag"); log("Anti-lag dimuat ulang"); return
+        K.revive("lag"); LG.pending = true; return
     end
-    if not ready(m) then return end
+    if not K.ready(m) then return end
     if V.lag.running then return end
-    fire(LG.apply, "MouseButton1Click")
+    K.fireSig(LG.apply, "MouseButton1Click")
     log("Anti-lag memproses objek…")
 end
-local function lagRestore()
+function K.lagRestore()
     if MOD.lag.state ~= "ready" then return end
-    if LG.restore then fire(LG.restore, "MouseButton1Click"); log("Anti-lag dipulihkan") end
+    if LG.restore then K.fireSig(LG.restore, "MouseButton1Click"); log("Anti-lag dipulihkan") end
 end
-local function lagUnload()
-    if not ready(MOD.lag) then return end
-    if LG.unload then fire(LG.unload, "MouseButton1Click"); log("Anti-lag dilepas"); toast("Anti-lag dilepas") end
+function K.lagUnload()
+    if not K.ready(MOD.lag) then return end
+    if LG.unload then K.fireSig(LG.unload, "MouseButton1Click"); say("info", "Anti-lag dilepas") end
 end
-local function lagPreset(name)
-    if not ready(MOD.lag) then return end
+function K.lagPreset(name)
+    if not K.ready(MOD.lag) then return end
     local b = LG.txt[name]
-    if b then fire(b, "MouseButton1Click"); log("Preset " .. name .. " dipilih, tekan Terapkan") end
+    if b then K.fireSig(b, "MouseButton1Click"); log("Preset " .. name .. " dipilih, tekan Terapkan") end
 end
-local function lagTgGet(name)
+function K.lagTgGet(name)
     if MOD.lag.state ~= "ready" then return nil end
     local t = LG.tg[name]
     if not t or not t.pill then return nil end
     return t.pill.BackgroundColor3.G > 0.5
 end
-local function lagTgFlip(name)
-    if not ready(MOD.lag) then return end
+function K.lagTgFlip(name)
+    if not K.ready(MOD.lag) then return end
     local t = LG.tg[name]
-    if t and t.btn then fire(t.btn, "MouseButton1Click") end
+    if t and t.btn then K.fireSig(t.btn, "MouseButton1Click") end
 end
-local function lagSlGet(name)
+function K.lagSlGet(name)
     local s = LG.sl and LG.sl[name]
     if MOD.lag.state ~= "ready" or not s or not s.val then return nil end
     return tonumber(s.val.Text)
 end
--- slider anti-lag: kirim input sentuh tiruan ke slider aslinya, lalu lepas lewat handler InputEnded milik Nono
-local function lagSlSet(name, mn, mx, step, v, final)
+-- slider anti-lag: input tiruan ke slider aslinya, dilepas lewat handler InputEnded milik Nono
+function K.lagSlSet(name, mn, mx, step, v, final)
     if MOD.lag.state ~= "ready" then return end
     local s = LG.sl[name]
-    if not s or not s.track or not s.hit or not HAS.conn or #MOD.lag.ended == 0 then
-        if final then toast("Slider anti-lag butuh executor dengan getconnections") end
+    if not s or not s.track or not s.hit or not CAP.getconnections or #MOD.lag.ended == 0 then
+        if final then toast("Slider anti-lag butuh executor dengan getconnections", "warn") end
         return
     end
     local now = os.clock()
@@ -3713,72 +4084,194 @@ local function lagSlSet(name, mn, mx, step, v, final)
     for _, c in ipairs(MOD.lag.ended) do pcall(function() c:Fire(fake(Enum.UserInputState.End)) end) end
 end
 
-local function cfgNote()
-    toast("Opsi ini butuh executor dengan getgc dan modul yang aktif")
+function K.cfgNote()
+    toast("Opsi ini butuh executor dengan upvalue atau getgc, dan modul yang aktif", "warn")
 end
-local function cbool(which, field)
+function K.cbool(which, field)
     return function()
-        local v = cget(which, field)
+        local v = K.cget(which, field)
         if v == nil then return nil end
         return v and true or false
     end, function()
         local t = CFGT[which]
-        if not t then cfgNote(); return end
+        if not t then K.cfgNote(); return end
         t[field] = not t[field]
+        K.saveSoon()
     end
 end
-local function cnum(which, field)
-    return function() return cget(which, field) end,
-        function(v) local t = CFGT[which]; if t then t[field] = v end end
+function K.cnum(which, field)
+    return function() return K.cget(which, field) end,
+        function(v, final)
+            local t = CFGT[which]
+            if t then t[field] = v; if final then K.saveSoon() end end
+        end
 end
 
-local function allOn() setGym(true); setWar("parry", true); setWar("lock", true); lagApply(); log("Semua sistem dinyalakan") end
-local function allOff() setGym(false); setWar("parry", false); setWar("lock", false); lagRestore(); log("Semua sistem dimatikan") end
+function K.allOn() K.setGym(true); K.setWar("parry", true); K.setWar("lock", true); K.lagApply(); log("Semua sistem dinyalakan", "ok") end
+function K.allOff() K.setGym(false); K.setWar("parry", false); K.setWar("lock", false); K.lagRestore(); log("Semua sistem dimatikan") end
 
-local function modNote(m)
-    if m.state == "ready" then return "" end
-    if m.state == "loading" then return "Memuat modul…" end
-    if m.state == "gone" then return "Anti-lag dilepas. Tekan Terapkan untuk memuat ulang." end
-    return m.err or m.note
+-- ---------- statistik timing Wraith ----------
+function K.calcStats()
+    local out = { lead = {}, best = nil, total = 0, learned = 0, low = 0, capped = 0, zero = false }
+    local W_, L, H = CFGT.war, WI.lead, WI.hd
+    if L and W_ and type(W_.LeadSet) == "table" and type(L.a) == "table" and type(L.b) == "table" then
+        local bm
+        for i, v in ipairs(W_.LeadSet) do
+            local a, b = L.a[i], L.b[i]
+            if type(a) == "number" and type(b) == "number" then
+                local m = a / (a + b)
+                out.lead[i] = { v = v, mean = m, n = math.max(0, a + b - 2) }
+                if not bm or m > bm then bm = m; out.best = i end
+            end
+        end
+    end
+    if H then
+        local minS = (W_ and tonumber(W_.MinSamples)) or 1
+        for k, e in pairs(H) do
+            if type(e) == "table" then
+                local n = tonumber(e.n) or 0
+                out.total = out.total + 1
+                if n >= minS then out.learned = out.learned + 1 end
+                if n <= 2 then out.low = out.low + 1 end
+                if n >= 50 then out.capped = out.capped + 1 end
+                if type(k) == "string" and k:sub(-2) == "#0" then out.zero = true end
+            end
+        end
+    end
+    return out
+end
+
+function K.saveWarFile()
+    local W_ = CFGT.war
+    if not CAP.file or not W_ or not WI.hd or not WI.lead then return end
+    local ok, js = pcall(HttpService.JSONEncode, HttpService,
+        { hd = WI.hd, lead = { a = WI.lead.a, b = WI.lead.b, n = WI.lead.n or 0 } })
+    if ok then pcall(writefile, W_.SaveFile or "wraith_v12_timing.json", js) end
+end
+function K.cleanHD()
+    local H = WI.hd
+    if not H then toast("Butuh debug.getupvalues untuk akses data timing", "warn"); return end
+    local n = 0
+    for k, e in pairs(H) do
+        if type(e) == "table" and (tonumber(e.n) or 0) <= 2 then H[k] = nil; n = n + 1 end
+    end
+    K.saveWarFile()
+    say("ok", n .. " sampel meragukan dibersihkan")
+end
+function K.resetHD()
+    local H = WI.hd
+    if not H then toast("Butuh debug.getupvalues untuk akses data timing", "warn"); return end
+    for k in pairs(H) do H[k] = nil end
+    K.saveWarFile()
+    say("ok", "Data timing animasi direset")
+end
+function K.resetLead()
+    local L = WI.lead
+    if not L or type(L.a) ~= "table" then toast("Butuh debug.getupvalues untuk akses data lead", "warn"); return end
+    for i = 1, #L.a do L.a[i] = 1; L.b[i] = 1 end
+    L.n = 0
+    K.saveWarFile()
+    say("ok", "Statistik lead direset")
+end
+
+-- profil kombat (preset)
+local WAR_PRESETS = {
+    { "Hemat",      { HoldTail = 0.06, HoldUnknown = 0.22, HoldHeavy = 0.38, EcoSkipLow = true,  EcoGuardLow = 0.40, RefreshMax = 1, PredRefresh = 0 } },
+    { "Seimbang",   { HoldTail = 0.08, HoldUnknown = 0.30, HoldHeavy = 0.45, EcoSkipLow = true,  EcoGuardLow = 0.35, RefreshMax = 2, PredRefresh = 0 } },
+    { "Tahan lama", { HoldTail = 0.14, HoldUnknown = 0.42, HoldHeavy = 0.60, EcoSkipLow = false, EcoGuardLow = 0.25, RefreshMax = 3, PredRefresh = 1 } },
+}
+function K.matchPreset()
+    local t = CFGT.war
+    if not t then return nil end
+    for i, p in ipairs(WAR_PRESETS) do
+        local ok = true
+        for k, v in pairs(p[2]) do
+            local cur = rawget(t, k)
+            if type(v) == "number" then
+                if type(cur) ~= "number" or math.abs(cur - v) > 0.005 then ok = false; break end
+            elseif cur ~= v then ok = false; break end
+        end
+        if ok then return i end
+    end
+    return nil
+end
+function K.applyPreset(i)
+    local t = CFGT.war
+    if not t then K.cfgNote(); return end
+    for k, v in pairs(WAR_PRESETS[i][2]) do t[k] = v end
+    K.saveSoon()
+    log("Profil kombat: " .. WAR_PRESETS[i][1], "ok")
+end
+
+-- ---------- laporan ----------
+function K.report()
+    local L = {}
+    L[#L + 1] = "SKILL ISSUE FINAL BOSS v" .. VERSION .. " | laporan diagnostik"
+    L[#L + 1] = "executor: " .. EXEC .. " | place: " .. tostring(game.PlaceId)
+    local c = {}
+    for k, v in pairs(CAP) do c[#c + 1] = k .. "=" .. tostring(v) end
+    table.sort(c)
+    L[#L + 1] = "fitur: " .. table.concat(c, " ")
+    for _, k in ipairs({ "gym", "war", "lag" }) do
+        local m = MOD[k]
+        L[#L + 1] = string.format("modul %s: %s%s", k, m.state, m.err and (" | " .. tostring(m.err)) or "")
+    end
+    L[#L + 1] = string.format("cfg gym=%s war=%s game=%s | wraith lead=%s hd=%s | hotkey diredam=%d | nono input=%d",
+        tostring(CFGT.gym ~= nil), tostring(CFGT.war ~= nil), tostring(CFGT.game ~= nil), tostring(WI.lead ~= nil),
+        tostring(WI.hd ~= nil), #MUTED, #MOD.lag.ended)
+    L[#L + 1] = "log:"
+    for i = #LOGS, 1, -1 do L[#L + 1] = "  " .. LOGS[i].t .. " [" .. LOGS[i].k .. "] " .. LOGS[i].m end
+    return table.concat(L, "\n")
+end
+function K.copyReport()
+    local r = K.report()
+    if CAP.clipboard then
+        pcall(setclipboard, r)
+        say("ok", "Laporan diagnostik disalin")
+    else
+        print(r)
+        say("warn", "Executor tanpa clipboard, laporan dicetak ke konsol")
+    end
+end
+
+-- ---------- pulihkan GUI asli dan tutup ----------
+function K.restore()
+    pcall(function() if GY.btn and GY.btn.Parent then GY.btn.Visible = true end end)
+    pcall(function() if WR.sg and WR.sg.Parent then WR.sg.Enabled = true end end)
+    pcall(function() if LG.main and LG.main.Parent then LG.main.Position = LG.origPos or UDim2.new(0, 12, 0, 80) end end)
+    K.unmuteAll()
+end
+function K.shutdownAll()
+    K.allOff()
+    task.delay(0.6, function()
+        pcall(function() if type(env.__GYMBOT_STOP) == "function" then env.__GYMBOT_STOP() end end)
+        pcall(function() if type(env.NonoCleanup) == "function" then env.NonoCleanup() end end)
+        if env.__SIFB_STOP then env.__SIFB_STOP() end
+    end)
 end
 
 -- =====================================================================
---  UI
+--  REGISTRASI REFRESHER, DRAG
 -- =====================================================================
-local LO = 0
-local function nextLO() LO = LO + 1; return LO end
-local function new(cls, props, parent)
-    local o = Instance.new(cls)
-    for k, v in pairs(props) do o[k] = v end
-    if parent then o.Parent = parent end
-    return o
+local REF, REFC, THF = {}, {}, {}
+local BT, curTab = nil, "home"
+local function runR(r, force)
+    if not force and r.tab and r.tab ~= curTab then return end
+    local ok, e = pcall(r.fn)
+    if not ok and not r.err then
+        r.err = true
+        log("UI: " .. tostring(e):sub(1, 90), "err")
+    end
 end
-local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
-local function stroke(o, c, t, tr)
-    return new("UIStroke", { Color = c, Thickness = t, Transparency = tr, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
+local function reg(fn, core)
+    local r = { fn = fn, tab = BT, err = false }
+    REF[#REF + 1] = r
+    if core then REFC[#REFC + 1] = r end
+    runR(r, true)
 end
-local function padding(o, t, r, b, l)
-    return new("UIPadding", { PaddingTop = UDim.new(0, t), PaddingRight = UDim.new(0, r), PaddingBottom = UDim.new(0, b), PaddingLeft = UDim.new(0, l) }, o)
-end
-local function vlist(o, gap) return new("UIListLayout", { Padding = UDim.new(0, gap), SortOrder = Enum.SortOrder.LayoutOrder }, o) end
-local function hlist(o, gap)
-    return new("UIListLayout", { Padding = UDim.new(0, gap), FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder }, o)
-end
-local function label(parent, txt, size, col, font, props)
-    local p = { Text = txt, TextSize = size, TextColor3 = col, Font = font or FB, BackgroundTransparency = 1,
-        BorderSizePixel = 0, TextXAlignment = Enum.TextXAlignment.Left }
-    for k, v in pairs(props or {}) do p[k] = v end
-    return new("TextLabel", p, parent)
-end
-local CENTER = Enum.TextXAlignment.Center
-local AUTO_Y, AUTO_X = Enum.AutomaticSize.Y, Enum.AutomaticSize.X
+local function onTheme(fn) THF[#THF + 1] = fn; pcall(fn) end
 
-local REF, THF = {}, {}
-local function reg(fn) REF[#REF + 1] = fn; pcall(fn) end
-local function onTheme(fn) THF[#THF + 1] = fn; fn() end
-
--- ---------- manajer drag (jendela, tombol bulat, slider) ----------
-local DRAG
+local DRAG, LASTDRAG = nil, 0
 local function isPtr(i)
     local t = i.UserInputType
     return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
@@ -3792,7 +4285,9 @@ track(UIS.InputEnded:Connect(function(i)
     if DRAG and isPtr(i) then local d = DRAG; DRAG = nil; d.stop() end
 end))
 
--- ---------- ScreenGui ----------
+-- =====================================================================
+--  WINDOW
+-- =====================================================================
 ROOT = Instance.new("ScreenGui")
 ROOT.Name = "SIFB_Hub"
 ROOT.ResetOnSpawn = false
@@ -3805,22 +4300,22 @@ if not okp or not ROOT.Parent then
     ROOT.Parent = PGui
 end
 
-local HDR, TABH, FTR = 62, 36, 28
-local WIN = { w = 392, h = 590 }
-local win = new("CanvasGroup", {
-    Name = "Win", Size = UDim2.fromOffset(392, 590), Position = UDim2.fromOffset(40, 24),
-    BackgroundColor3 = TH.ink, BackgroundTransparency = 0.26, BorderSizePixel = 0, ClipsDescendants = true, Active = true,
-}, ROOT)
-corner(win, 16); stroke(win, WHITE, 1, 0.9)
-local wscale = new("UIScale", { Scale = 1 }, win)
+local HDR, TABH, FTR = 62, 38, 28
+local WIN = { w = 392, h = 600 }
+local OPEN, MINI = true, false
+
+UI.win = new("CanvasGroup", { Name = "Win", Size = UDim2.fromOffset(392, 600), Position = UDim2.fromOffset(40, 24),
+    BackgroundColor3 = TH.ink, BackgroundTransparency = 1 - S.op / 100, BorderSizePixel = 0, ClipsDescendants = true, Active = true }, ROOT)
+corner(UI.win, 16); stroke(UI.win, WHITE, 1, 0.9)
+UI.wscale = new("UIScale", { Scale = S.sc / 100 }, UI.win)
 
 local function vp()
     local cam = workspace.CurrentCamera
     return cam and cam.ViewportSize or Vector2.new(1280, 720)
 end
 local function sizeOf(obj)
-    if obj == win then return Vector2.new(WIN.w * wscale.Scale, WIN.h * wscale.Scale) end
-    return Vector2.new(44, 44)
+    if obj == UI.win then return Vector2.new(WIN.w * UI.wscale.Scale, WIN.h * UI.wscale.Scale) end
+    return Vector2.new(obj.Size.X.Offset, obj.Size.Y.Offset)
 end
 local function clampTo(obj, x, y)
     local v, s = vp(), sizeOf(obj)
@@ -3829,90 +4324,163 @@ local function clampTo(obj, x, y)
     obj.Position = UDim2.fromOffset(x, y)
 end
 local function applyLayout()
-    local v, sc = vp(), wscale.Scale
+    local v, sc = vp(), UI.wscale.Scale
     WIN.w = math.min(392, math.floor(v.X / sc) - 16)
-    WIN.h = math.min(590, math.floor(v.Y / sc) - 24)
-    win.Size = UDim2.fromOffset(WIN.w, WIN.h)
-    clampTo(win, win.Position.X.Offset, win.Position.Y.Offset)
+    WIN.h = math.min(600, math.floor(v.Y / sc) - 24)
+    UI.win.Size = UDim2.fromOffset(WIN.w, WIN.h)
+    clampTo(UI.win, UI.win.Position.X.Offset, UI.win.Position.Y.Offset)
 end
 
 -- watermark samar "By Duke"
-label(win, "By Duke", 62, WHITE, FD, {
-    Size = UDim2.fromOffset(260, 76), AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, 14, 1, -40),
-    Rotation = -12, TextTransparency = 0.965, TextXAlignment = Enum.TextXAlignment.Right,
-})
+label(UI.win, "By Duke", 62, WHITE, FD, { Size = UDim2.fromOffset(260, 76), AnchorPoint = Vector2.new(1, 1),
+    Position = UDim2.new(1, 14, 1, -40), Rotation = -12, TextTransparency = 0.965, TextXAlignment = Enum.TextXAlignment.Right })
 
--- header
-local hd = new("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, HDR), BackgroundTransparency = 1, Active = true }, win)
-new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, hd)
-label(hd, "Skill issue final boss", 15, TH.bone, FD, { Position = UDim2.fromOffset(12, 9), Size = UDim2.new(1, -130, 0, 18) })
-UI.sub = label(hd, "By Duke · 0/3 aktif", 11, TH.mute, FS, { Position = UDim2.fromOffset(12, 28), Size = UDim2.new(1, -130, 0, 14) })
+-- ---------- drag ----------
+function W.startDrag(obj, input, onTap, onHold, onDone)
+    local sx, sy = input.Position.X, input.Position.Y
+    local ox, oy = obj.Position.X.Offset, obj.Position.Y.Offset
+    local moved, held, token = false, false, {}
+    DRAG = {
+        tk = token,
+        move = function(p)
+            local dx, dy = p.X - sx, p.Y - sy
+            if not moved and math.abs(dx) + math.abs(dy) < 8 then return end
+            moved = true
+            clampTo(obj, ox + dx, oy + dy)
+        end,
+        stop = function()
+            if moved then
+                LASTDRAG = os.clock()
+                if onDone then onDone() end
+            elseif not held and onTap then
+                onTap()
+            end
+        end,
+    }
+    if onHold then
+        task.delay(0.5, function()
+            if DRAG and DRAG.tk == token and not moved then held = true; onHold() end
+        end)
+    end
+end
+
+-- ---------- header ----------
+UI.hd = new("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, HDR), BackgroundTransparency = 1, Active = true }, UI.win)
+new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, UI.hd)
+label(UI.hd, "Skill issue final boss", 15, TH.bone, FD, { Position = UDim2.fromOffset(12, 9), Size = UDim2.new(1, -160, 0, 18) })
+UI.sub = label(UI.hd, "By Duke · 0/3 aktif", 11, TH.mute, FS, { Position = UDim2.fromOffset(12, 28), Size = UDim2.new(1, -160, 0, 14) })
 UI.segs = {}
 for i = 1, 3 do
-    local s = new("Frame", { Size = UDim2.fromOffset(40, 5), Position = UDim2.fromOffset(12 + (i - 1) * 43, 48), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0 }, hd)
+    local s = new("Frame", { Size = UDim2.fromOffset(40, 5), Position = UDim2.fromOffset(12 + (i - 1) * 43, 48), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0 }, UI.hd)
     corner(s, 2); UI.segs[i] = s
 end
-local fpsPill = new("Frame", { Size = UDim2.fromOffset(60, 22), Position = UDim2.new(1, -108, 0, 14), BackgroundTransparency = 1 }, hd)
+local fpsPill = new("Frame", { Size = UDim2.fromOffset(58, 22), Position = UDim2.new(1, -144, 0, 14), BackgroundTransparency = 1 }, UI.hd)
 corner(fpsPill, 11); stroke(fpsPill, WHITE, 1, 0.85)
 UI.hfps = label(fpsPill, "-- fps", 11, TH.on, FD, { Size = UDim2.new(1, 0, 1, 0), TextXAlignment = CENTER })
-local minBtn = new("TextButton", { Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0, 11), BackgroundColor3 = WHITE,
-    BackgroundTransparency = 0.94, Text = "–", TextSize = 16, Font = FD, TextColor3 = TH.bone, AutoButtonColor = false, BorderSizePixel = 0 }, hd)
-corner(minBtn, 8); stroke(minBtn, WHITE, 1, 0.9)
 
--- tab
-local tabBar = new("Frame", { Size = UDim2.new(1, 0, 0, TABH), Position = UDim2.fromOffset(0, HDR), BackgroundTransparency = 1 }, win)
-new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, tabBar)
-local TABS = { { "home", "Beranda" }, { "gym", "Gym" }, { "com", "Combat" }, { "lag", "Anti-lag" }, { "cfg", "Pengaturan" } }
-local PANES, TABBTN, curTab = {}, {}, "home"
+function W.iconBtn(parent, kind, pos, onClick)
+    local b = new("TextButton", { Size = UDim2.fromOffset(28, 28), Position = pos, BackgroundColor3 = WHITE, BackgroundTransparency = 0.94,
+        Text = "", AutoButtonColor = false, BorderSizePixel = 0 }, parent)
+    corner(b, 8); stroke(b, WHITE, 1, 0.9)
+    if kind == "min" then
+        local l = new("Frame", { Size = UDim2.fromOffset(12, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundColor3 = TH.bone, BorderSizePixel = 0 }, b)
+        corner(l, 1)
+    else
+        local sz = kind == "compact" and Vector2.new(14, 8) or Vector2.new(12, 12)
+        local r = new("Frame", { Size = UDim2.fromOffset(sz.X, sz.Y), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+            BackgroundTransparency = 1, BorderSizePixel = 0 }, b)
+        corner(r, 3); stroke(r, TH.bone, 1.5, 0)
+    end
+    b.Activated:Connect(function()
+        if os.clock() - LASTDRAG < 0.25 then return end
+        onClick()
+    end)
+    return b
+end
 
--- footer
-local foot = new("Frame", { Size = UDim2.new(1, 0, 0, FTR), Position = UDim2.new(0, 0, 1, -FTR), BackgroundTransparency = 1 }, win)
+-- ---------- tab ----------
+local TABS = { { "home", "Beranda" }, { "gym", "Gym" }, { "com", "Combat" }, { "lag", "Anti-lag" }, { "cfg", "Setelan" } }
+UI.tabBar = new("Frame", { Size = UDim2.new(1, 0, 0, TABH), Position = UDim2.fromOffset(0, HDR), BackgroundTransparency = 1 }, UI.win)
+new("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, UI.tabBar)
+UI.ind = new("Frame", { Size = UDim2.new(1 / #TABS, -16, 0, 2), Position = UDim2.new(0, 8, 1, -2), BackgroundColor3 = TH.brand, BorderSizePixel = 0 }, UI.tabBar)
+corner(UI.ind, 1); onTheme(function() UI.ind.BackgroundColor3 = TH.brand end)
+UI.groups, UI.panes, UI.tabBtn = {}, {}, {}
+
+function W.showTab(id)
+    if id == curTab then return end
+    curTab = id
+    for k, g in pairs(UI.groups) do if k ~= id then g.Visible = false end end
+    local g = UI.groups[id]
+    g.Visible = true
+    local base = UDim2.fromOffset(0, HDR + TABH)
+    if S.motion then
+        g.GroupTransparency = 1; g.Position = UDim2.fromOffset(0, HDR + TABH + 10)
+        tw(g, 0.16, { GroupTransparency = 0, Position = base })
+    else
+        g.GroupTransparency = 0; g.Position = base
+    end
+    for i, t in ipairs(TABS) do
+        if t[1] == id then tw(UI.ind, 0.18, { Position = UDim2.new((i - 1) / #TABS, 8, 1, -2) }) end
+    end
+    for _, r in ipairs(REF) do if r.tab == id then runR(r, true) end end
+end
+
+for i, t in ipairs(TABS) do
+    local b = new("TextButton", { Size = UDim2.new(1 / #TABS, 0, 1, -1), Position = UDim2.new((i - 1) / #TABS, 0, 0, 0), BackgroundTransparency = 1,
+        Text = t[2], TextSize = 12, Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, UI.tabBar)
+    b.Activated:Connect(function() W.showTab(t[1]) end)
+    UI.tabBtn[t[1]] = b
+    local g = new("CanvasGroup", { Name = "G_" .. t[1], Size = UDim2.new(1, 0, 1, -(HDR + TABH + FTR)), Position = UDim2.fromOffset(0, HDR + TABH),
+        BackgroundTransparency = 1, BorderSizePixel = 0, Visible = (t[1] == "home") }, UI.win)
+    local sf = new("ScrollingFrame", { Name = t[1], Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = TH.mute, CanvasSize = UDim2.new(), AutomaticCanvasSize = AUTO_Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y }, g)
+    padd(sf, 12, 12, 12, 12); vlist(sf, 8)
+    UI.groups[t[1]], UI.panes[t[1]] = g, sf
+end
+reg(function()
+    for id, b in pairs(UI.tabBtn) do b.TextColor3 = (id == curTab) and TH.bone or TH.mute end
+end, true)
+
+-- ---------- footer + toast ----------
+local foot = new("Frame", { Size = UDim2.new(1, 0, 0, FTR), Position = UDim2.new(0, 0, 1, -FTR), BackgroundTransparency = 1 }, UI.win)
 new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, foot)
 local fdot = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, 12, 0.5, -3), BackgroundColor3 = TH.brand, BorderSizePixel = 0 }, foot)
 corner(fdot, 3); onTheme(function() fdot.BackgroundColor3 = TH.brand end)
 label(foot, "By Duke", 12, TH.bone, FD, { Position = UDim2.fromOffset(24, 0), Size = UDim2.new(0.4, 0, 1, 0) })
-label(foot, "Skill issue final boss · v1.0", 11, TH.mute, FS, { Position = UDim2.new(0.4, 0, 0, 0), Size = UDim2.new(0.6, -12, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
+label(foot, "Skill issue final boss · v" .. VERSION, 11, TH.mute, FS, { Position = UDim2.new(0.4, 0, 0, 0), Size = UDim2.new(0.6, -12, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
 
-UI.toast = new("TextLabel", { Size = UDim2.fromOffset(0, 28), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(0.5, 1),
-    Position = UDim2.new(0.5, 0, 1, -38), BackgroundColor3 = WHITE, BorderSizePixel = 0, Text = "", TextSize = 12, Font = FD,
-    TextColor3 = TH.dark, Visible = false, ZIndex = 30 }, win)
-corner(UI.toast, 9); padding(UI.toast, 0, 12, 0, 12)
+UI.toasts = new("Frame", { Size = UDim2.new(1, -24, 0, 0), AutomaticSize = AUTO_Y, AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, HDR + TABH + 8), BackgroundTransparency = 1, ZIndex = 30 }, UI.win)
+vlist(UI.toasts, 6, Enum.HorizontalAlignment.Center)
 
--- ---------- pane, card, kontrol ----------
-local function newPane(id)
-    local sf = new("ScrollingFrame", { Name = id, Size = UDim2.new(1, 0, 1, -(HDR + TABH + FTR)), Position = UDim2.fromOffset(0, HDR + TABH),
-        BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = TH.mute,
-        CanvasSize = UDim2.new(), AutomaticCanvasSize = AUTO_Y, ScrollingDirection = Enum.ScrollingDirection.Y,
-        Visible = (id == "home") }, win)
-    padding(sf, 12, 12, 12, 12); vlist(sf, 8)
-    PANES[id] = sf
-    return sf
-end
-
-local function card(parent)
+-- =====================================================================
+--  WIDGET
+-- =====================================================================
+function W.card(parent)
     local f = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundColor3 = WHITE,
         BackgroundTransparency = 0.955, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
-    corner(f, 10); stroke(f, WHITE, 1, 0.9); padding(f, 0, 12, 0, 12); vlist(f, 0)
+    corner(f, 10); stroke(f, WHITE, 1, 0.9); padd(f, 0, 12, 0, 12); vlist(f, 0)
     return f
 end
-local function divider(parent)
+function W.divider(parent)
     local n = parent:GetAttribute("n") or 0
     parent:SetAttribute("n", n + 1)
     if n > 0 then
         new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
     end
 end
-local function heading(parent, text)
+function W.heading(parent, text)
     return label(parent, text, 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 16), LayoutOrder = nextLO() })
 end
 
-local function makeRow(parent, title, sub, clickable, rightW)
-    divider(parent)
+function W.row(parent, title, sub, clickable, rightW, leftPad)
+    W.divider(parent)
     local row = new(clickable and "TextButton" or "Frame", { Size = UDim2.new(1, 0, 0, 40), AutomaticSize = AUTO_Y,
         BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
     if clickable then row.Text = ""; row.AutoButtonColor = false end
     local tx = new("Frame", { Size = UDim2.new(1, -(rightW or 50), 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1 }, row)
-    padding(tx, 11, 0, 11, 0); vlist(tx, 1)
+    padd(tx, 11, 0, 11, leftPad or 0); vlist(tx, 1)
     label(tx, title, 13, TH.bone, FB, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = 1 })
     if sub then
         local sl = label(tx, "", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = 2 })
@@ -3921,7 +4489,7 @@ local function makeRow(parent, title, sub, clickable, rightW)
     return row
 end
 
-local function makeSwitch(row)
+function W.switch(row)
     local sw = new("Frame", { Size = UDim2.fromOffset(36, 21), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
         BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0 }, row)
     corner(sw, 11)
@@ -3932,83 +4500,117 @@ local function makeSwitch(row)
         if state == last then return end
         last = state
         local on = state == true
-        local info = TweenInfo.new(0.12)
-        TweenService:Create(sw, info, { BackgroundColor3 = on and TH.on or WHITE, BackgroundTransparency = on and 0 or 0.9 }):Play()
-        TweenService:Create(knob, info, { Position = on and UDim2.fromOffset(18, 3) or UDim2.fromOffset(3, 3),
-            BackgroundColor3 = (state == nil) and TH.mute or WHITE }):Play()
+        tw(sw, 0.12, { BackgroundColor3 = on and TH.on or WHITE, BackgroundTransparency = on and 0 or 0.9 })
+        tw(knob, 0.12, { Position = on and UDim2.fromOffset(18, 3) or UDim2.fromOffset(3, 3), BackgroundColor3 = (state == nil) and TH.mute or WHITE })
     end
 end
 
-local function addToggle(parent, title, sub, get, flip)
-    local row = makeRow(parent, title, sub, true)
-    local paint = makeSwitch(row)
+function W.toggle(parent, title, sub, get, flip)
+    local row = W.row(parent, title, sub, true)
+    local paint = W.switch(row)
     row.Activated:Connect(function()
         local ok, e = pcall(flip)
-        if not ok then toast("Gagal: " .. tostring(e)) end
+        if not ok then toast("Gagal: " .. tostring(e), "err") end
         paint(get())
     end)
     reg(function() paint(get()) end)
 end
 
-local function addChipRow(parent, title, sub)
-    local row = makeRow(parent, title, sub, false, 120)
+function W.chipRow(parent, title, sub)
+    local row = W.row(parent, title, sub, false, 120)
     local chip = new("Frame", { Size = UDim2.fromOffset(0, 22), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0), BackgroundTransparency = 1, BorderSizePixel = 0 }, row)
-    corner(chip, 11); stroke(chip, WHITE, 1, 0.85); padding(chip, 0, 10, 0, 10)
+    corner(chip, 11); stroke(chip, WHITE, 1, 0.85); padd(chip, 0, 10, 0, 10)
     local cl = label(chip, "", 11, TH.mute, FD, { Size = UDim2.fromOffset(0, 22), AutomaticSize = AUTO_X, TextXAlignment = CENTER })
     return function(t, c) cl.Text = t; cl.TextColor3 = c end
 end
 
-local function mkBtn(parent, text, style, onClick, props)
-    local p = { BackgroundColor3 = WHITE, BackgroundTransparency = 0.93, Text = text, TextSize = 13, Font = FD,
+function W.btn(parent, text, style, onClick, props)
+    local base = (style == "pri") and 0 or 0.93
+    local p = { BackgroundColor3 = WHITE, BackgroundTransparency = base, Text = text, TextSize = 13, Font = FD,
         TextColor3 = TH.bone, AutoButtonColor = false, BorderSizePixel = 0 }
     for k, v in pairs(props or {}) do p[k] = v end
     local b = new("TextButton", p, parent)
     corner(b, 9); stroke(b, WHITE, 1, 0.9)
     if style == "pri" then
-        b.BackgroundTransparency = 0; b.TextColor3 = TH.dark
+        b.TextColor3 = TH.dark
         onTheme(function() b.BackgroundColor3 = TH.brand end)
     elseif style == "dng" then
-        onTheme(function() b.TextColor3 = TH.brand end)
+        onTheme(function() b.TextColor3 = TH.err end)
     end
+    b.MouseButton1Down:Connect(function() tw(b, 0.08, { BackgroundTransparency = (style == "pri") and 0.2 or 0.82 }) end)
+    b.MouseButton1Up:Connect(function() tw(b, 0.12, { BackgroundTransparency = base }) end)
+    b.MouseLeave:Connect(function() tw(b, 0.12, { BackgroundTransparency = base }) end)
     b.Activated:Connect(onClick)
     return b
 end
 
-local function btnRow(parent, specs)
+-- tombol dua langkah: ketukan pertama minta konfirmasi
+function W.confirm(parent, text, onYes, props)
+    local armed, b = 0, nil
+    b = W.btn(parent, text, "dng", function()
+        if os.clock() < armed then
+            armed = 0; b.Text = text; onYes()
+        else
+            armed = os.clock() + 3; b.Text = "Yakin? Tekan lagi"
+            task.delay(3.05, function()
+                if b.Parent and armed ~= 0 and os.clock() >= armed then armed = 0; b.Text = text end
+            end)
+        end
+    end, props)
+    return b
+end
+
+function W.btnRow(parent, specs)
     local f = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
     hlist(f, 8)
     local n, total = #specs, 0
     for _, s in ipairs(specs) do total = total + (s[4] or 1) end
-    local out = {}
     for i, s in ipairs(specs) do
         local w = (s[4] or 1) / total
-        out[i] = mkBtn(f, s[1], s[2], s[3], { Size = UDim2.new(w, -8 * (n - 1) * w, 1, 0), LayoutOrder = i })
+        local props = { Size = UDim2.new(w, -8 * (n - 1) * w, 1, 0), LayoutOrder = i, TextSize = 12 }
+        if s[5] then W.confirm(f, s[1], s[3], props) else W.btn(f, s[1], s[2], s[3], props) end
     end
-    return out
 end
 
-local function addBtnRow(parent, title, sub, textFn, onClick)
-    local row = makeRow(parent, title, sub, false, 120)
-    local b = mkBtn(row, "", "norm", onClick, { Size = UDim2.fromOffset(0, 28), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0.5),
+function W.btnRight(parent, title, sub, textFn, onClick)
+    local row = W.row(parent, title, sub, false, 130, 16)
+    local b = W.btn(row, "", "norm", onClick, { Size = UDim2.fromOffset(0, 28), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0), TextSize = 12 })
-    padding(b, 0, 10, 0, 10)
+    padd(b, 0, 10, 0, 10)
     reg(function() b.Text = textFn() end)
+    return row
 end
 
-local function addSlider(parent, title, mn, mx, step, unit, get, set)
-    divider(parent)
-    local row = new("Frame", { Size = UDim2.new(1, 0, 0, 54), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
-    label(row, title, 13, TH.bone, FB, { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(0.68, 0, 0, 18) })
-    local vl = label(row, "--", 12, TH.amb, FD, { Position = UDim2.new(0.68, 0, 0, 8), Size = UDim2.new(0.32, 0, 0, 18), TextXAlignment = Enum.TextXAlignment.Right })
-    local trk = new("Frame", { Position = UDim2.fromOffset(0, 37), Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.84, BorderSizePixel = 0 }, row)
+function W.dot(row, fn)
+    local d = new("Frame", { Size = UDim2.fromOffset(8, 8), AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = TH.mute, BorderSizePixel = 0 }, row)
+    corner(d, 4)
+    reg(function() d.BackgroundColor3 = fn() end)
+end
+
+function W.slider(parent, title, mn, mx, step, unit, get, set)
+    W.divider(parent)
+    local row = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
+    label(row, title, 13, TH.bone, FB, { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(1, -112, 0, 20), TextTruncate = Enum.TextTruncate.AtEnd })
+    local function stepBtn(txt, xoff)
+        local b = new("TextButton", { Size = UDim2.fromOffset(22, 22), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, xoff, 0, 7),
+            BackgroundColor3 = WHITE, BackgroundTransparency = 0.92, Text = txt, TextSize = 14, Font = FD, TextColor3 = TH.bone,
+            AutoButtonColor = false, BorderSizePixel = 0 }, row)
+        corner(b, 6)
+        return b
+    end
+    local plus, minus = stepBtn("+", 0), stepBtn("-", -80)
+    local vl = label(row, "--", 12, TH.amb, FD, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -24, 0, 8),
+        Size = UDim2.fromOffset(54, 20), TextXAlignment = CENTER })
+    local trk = new("Frame", { Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.84, BorderSizePixel = 0 }, row)
     corner(trk, 3)
     local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0, BackgroundColor3 = TH.brand }, trk)
     corner(fill, 3); onTheme(function() fill.BackgroundColor3 = TH.brand end)
     local thumb = new("Frame", { Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
         BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 3 }, trk)
     corner(thumb, 8)
-    local hit = new("TextButton", { Size = UDim2.new(1, 0, 0, 32), Position = UDim2.fromOffset(0, 24), BackgroundTransparency = 1, Text = "",
+    local hit = new("TextButton", { Size = UDim2.new(1, 0, 0, 26), Position = UDim2.fromOffset(0, 31), BackgroundTransparency = 1, Text = "",
         AutoButtonColor = false, ZIndex = 4 }, row)
     local dec = step >= 1 and 0 or #(tostring(step):match("%.(%d+)") or "")
     local fmt = "%." .. dec .. "f"
@@ -4025,6 +4627,14 @@ local function addSlider(parent, title, mn, mx, step, unit, get, set)
         local v = mn + math.floor(pct * (mx - mn) / step + 0.5) * step
         return tonumber(string.format(fmt, math.clamp(v, mn, mx)))
     end
+    local function nudge(dir)
+        local v = get()
+        if not v then toast("Modul belum siap atau opsi tidak tersedia", "warn"); return end
+        local nv = tonumber(string.format(fmt, math.clamp(v + dir * step, mn, mx)))
+        paint(nv); set(nv, true)
+    end
+    plus.Activated:Connect(function() nudge(1) end)
+    minus.Activated:Connect(function() nudge(-1) end)
     hit.InputBegan:Connect(function(i)
         if not isPtr(i) then return end
         local pane = row:FindFirstAncestorOfClass("ScrollingFrame")
@@ -4047,13 +4657,13 @@ local function addSlider(parent, title, mn, mx, step, unit, get, set)
     end)
 end
 
-local function addSeg(parent, labels, get, onPick)
+function W.seg(parent, labels, get, onPick)
     local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.72,
         BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
-    corner(bar, 9); padding(bar, 2, 2, 2, 2); hlist(bar, 2)
+    corner(bar, 9); padd(bar, 2, 2, 2, 2); hlist(bar, 2)
     local n, btns = #labels, {}
     for i, t in ipairs(labels) do
-        local b = new("TextButton", { Size = UDim2.new(1 / n, -(2 * (n - 1)) / n, 1, 0), BackgroundTransparency = 1, Text = t, TextSize = 13,
+        local b = new("TextButton", { Size = UDim2.new(1 / n, -(2 * (n - 1)) / n, 1, 0), BackgroundTransparency = 1, Text = t, TextSize = 12,
             Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0, LayoutOrder = i }, bar)
         corner(b, 7)
         b.Activated:Connect(function() onPick(i) end)
@@ -4070,138 +4680,266 @@ local function addSeg(parent, labels, get, onPick)
     end)
 end
 
-local function statGrid(parent, items)
+function W.grid(parent, items)
     local n, gap = #items, 8
-    local f = new("Frame", { Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
+    local f = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, LayoutOrder = nextLO() }, parent)
     hlist(f, gap)
     local vals = {}
     for i, it in ipairs(items) do
         local b = new("Frame", { Size = UDim2.new(1 / n, -gap * (n - 1) / n, 1, 0), BackgroundColor3 = WHITE, BackgroundTransparency = 0.955,
             BorderSizePixel = 0, LayoutOrder = i }, f)
         corner(b, 10); stroke(b, WHITE, 1, 0.9)
-        vals[it[1]] = label(b, "--", 17, TH.bone, FD, { Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 8), TextXAlignment = CENTER })
-        label(b, it[2], 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 34), TextXAlignment = CENTER })
+        vals[it[1]] = label(b, "--", 17, TH.bone, FD, { Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 9), TextXAlignment = CENTER })
+        label(b, it[2], 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 35), TextXAlignment = CENTER })
     end
     return vals
 end
 
-local function addMeter(parent)
+function W.meter(parent)
     local m = new("Frame", { Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0, LayoutOrder = nextLO() }, parent)
     corner(m, 3)
     local f = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = TH.on, BorderSizePixel = 0 }, m)
     corner(f, 3)
-    return function(pct, col)
-        TweenService:Create(f, TweenInfo.new(0.3), { Size = UDim2.new(math.clamp(pct, 0, 100) / 100, 0, 1, 0), BackgroundColor3 = col }):Play()
+    return function(pct, c)
+        tw(f, 0.3, { Size = UDim2.new(math.clamp(pct, 0, 100) / 100, 0, 1, 0), BackgroundColor3 = c })
     end
 end
 
-local function col(f) return f >= 55 and TH.on or (f >= 40 and TH.amb or TH.brand) end
+-- bagian yang bisa dilipat; mengembalikan wadah isi
+function W.section(parent, title, open)
+    local c = W.card(parent)
+    local hdr = new("TextButton", { Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, LayoutOrder = 1 }, c)
+    label(hdr, title, 13, TH.bone, FD, { Size = UDim2.new(1, -30, 1, 0) })
+    local chev = label(hdr, ">", 14, TH.mute, FD, { Size = UDim2.fromOffset(20, 20), AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, 0, 0.5, 0), TextXAlignment = CENTER, Rotation = open and 90 or 0 })
+    local body = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = 2, Visible = open }, c)
+    vlist(body, 0)
+    new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = 0.9, BorderSizePixel = 0, LayoutOrder = 0 }, body)
+    hdr.Activated:Connect(function()
+        open = not open
+        body.Visible = open
+        tw(chev, 0.15, { Rotation = open and 90 or 0 })
+    end)
+    return body
+end
+
+-- grafik batang riwayat
+function W.spark(parent, hist, maxv, colorFn, title, unit)
+    local c = W.card(parent)
+    local box = new("Frame", { Size = UDim2.new(1, 0, 0, 82), BackgroundTransparency = 1, LayoutOrder = nextLO() }, c)
+    label(box, title, 11, TH.mute, FS, { Position = UDim2.fromOffset(0, 9), Size = UDim2.new(0.7, 0, 0, 14) })
+    local vl = label(box, "--", 12, TH.bone, FD, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 8), Size = UDim2.new(0.3, 0, 0, 16), TextXAlignment = Enum.TextXAlignment.Right })
+    local area = new("Frame", { Position = UDim2.fromOffset(0, 30), Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1 }, box)
+    local N, bars = #hist, {}
+    for i = 1, N do
+        bars[i] = new("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new((i - 1) / N, 0, 1, 0), Size = UDim2.new(1 / N, -1, 0, 2),
+            BorderSizePixel = 0, BackgroundColor3 = TH.on }, area)
+        corner(bars[i], 1)
+    end
+    reg(function()
+        local last = 0
+        for i = 1, N do
+            local v = hist[i] or 0
+            bars[i].Size = UDim2.new(1 / N, -1, math.clamp(v / maxv, 0.05, 1), 0)
+            bars[i].BackgroundColor3 = colorFn(v)
+            last = v
+        end
+        vl.Text = tostring(last) .. unit
+    end)
+end
+
+-- banner status modul (muncul kalau modul belum siap)
+function W.banner(parent, key)
+    local c = W.card(parent)
+    local box = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c)
+    padd(box, 10, 0, 10, 0); vlist(box, 8)
+    local t = label(box, "", 12, TH.bone, FB, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = 1 })
+    W.btn(box, "Hubungkan ulang", "norm", function() K.revive(key) end, { Size = UDim2.new(1, 0, 0, 32), LayoutOrder = 2, TextSize = 12 })
+    reg(function()
+        local m = MOD[key]
+        c.Visible = m.state ~= "ready"
+        if c.Visible then
+            t.Text = m.label .. ": " .. K.modNote(m)
+            t.TextColor3 = (m.state == "loading") and TH.amb or TH.err
+        end
+    end)
+end
+
+-- slot profil kustom
+local PROF = { gym = 1, war = 1 }
+function W.slots(parent, which)
+    local c = W.card(parent)
+    local box = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c)
+    padd(box, 10, 0, 10, 0); vlist(box, 8)
+    label(box, "Profil kustom", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = nextLO() })
+    W.seg(box, { "Slot 1", "Slot 2", "Slot 3" }, function() return PROF[which] end, function(i) PROF[which] = i end)
+    local info = label(box, "", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = nextLO() })
+    W.btnRow(box, {
+        { "Simpan", "norm", function()
+            if not CFGT[which] then K.cfgNote(); return end
+            S.slots[which][tostring(PROF[which])] = snapCfg(CFGT[which], KEYS[which])
+            K.saveSoon(); say("ok", "Profil disimpan di slot " .. PROF[which])
+        end },
+        { "Muat", "pri", function()
+            local t = S.slots[which][tostring(PROF[which])]
+            if not t then toast("Slot " .. PROF[which] .. " masih kosong", "warn"); return end
+            if not CFGT[which] then K.cfgNote(); return end
+            applyCfg(CFGT[which], KEYS[which], t)
+            K.saveSoon(); say("ok", "Profil slot " .. PROF[which] .. " dimuat")
+        end },
+    })
+    reg(function()
+        info.Text = S.slots[which][tostring(PROF[which])] and "Slot ini sudah terisi" or "Slot ini kosong"
+    end)
+end
+
+local function col(f) return f >= 55 and TH.on or (f >= 40 and TH.amb or TH.err) end
+local function colPing(p) return p < 90 and TH.on or (p < 160 and TH.amb or TH.err) end
 
 -- =====================================================================
 --  ISI TAB
 -- =====================================================================
-for _, t in ipairs(TABS) do newPane(t[1]) end
-
 -- ---------- Beranda ----------
+BT = "home"
 do
-    local p = PANES.home
-    UI.hs = statGrid(p, { { "fps", "FPS" }, { "ping", "Ping (ms)" }, { "mem", "Memori (MB)" } })
+    local p = UI.panes.home
+    UI.hs = W.grid(p, { { "fps", "FPS" }, { "ping", "Ping (ms)" }, { "mem", "Memori (MB)" } })
+    reg(function()
+        local f = V.sys.fps
+        UI.hs.fps.Text = tostring(f); UI.hs.fps.TextColor3 = col(f)
+        UI.hs.ping.Text = tostring(math.floor(V.sys.ping)); UI.hs.ping.TextColor3 = colPing(V.sys.ping)
+        UI.hs.mem.Text = tostring(math.floor(V.sys.mem))
+    end)
+    W.spark(p, HIST.fps, 144, col, "FPS · 40 detik terakhir", "")
+    W.spark(p, HIST.ping, 300, colPing, "Ping · 40 detik terakhir", " ms")
 
-    local c1 = card(p)
-    addToggle(c1, "Gym bot", function()
-        if MOD.gym.state ~= "ready" then return MOD.gym.state == "loading" and "Memuat modul…" or "Tidak tersedia" end
-        return string.format("Level %s · %s", tostring(cget("gym", "Level") or "?"), gymGet() and "berjalan" or "mati")
-    end, gymGet, function() setGym(not gymGet()) end)
-
-    local c2 = card(p)
-    do
-        local row = makeRow(c2, "Combat tools", function()
-            if MOD.war.state ~= "ready" then return MOD.war.state == "loading" and "Memuat modul…" or "Tidak tersedia" end
-            return string.format("Parry %s · lock %s", warGet("parry") and "aktif" or "mati", warGet("lock") and "aktif" or "mati")
-        end, false, 0)
+    local function dotOf(key, onFn)
+        return function()
+            local m = MOD[key]
+            if m.state == "loading" then return TH.amb end
+            if m.state ~= "ready" then return TH.err end
+            return onFn() and TH.on or TH.mute
+        end
     end
-    addToggle(c2, "Auto parry", nil, function() return warGet("parry") end, function() setWar("parry", not warGet("parry")) end)
-    addToggle(c2, "Combat lock", nil, function() return warGet("lock") end, function() setWar("lock", not warGet("lock")) end)
+    local function stateSub(key, readyFn)
+        return function()
+            local m = MOD[key]
+            if m.state == "loading" then return "Memuat modul…" end
+            if m.state == "gone" then return "Dilepas" end
+            if m.state ~= "ready" then return "Tidak tersedia" end
+            return readyFn()
+        end
+    end
 
-    local c3 = card(p)
-    addBtnRow(c3, "Anti-lag", function()
-        local m = MOD.lag
-        if m.state == "gone" then return "Dilepas" end
-        if m.state ~= "ready" then return m.state == "loading" and "Memuat modul…" or "Tidak tersedia" end
-        if V.lag.running then return "Memproses " .. V.lag.prog .. "%" end
-        if V.lag.applied then return "Aktif · " .. V.lag.hidden .. " part disembunyikan" end
-        return "Belum diterapkan"
-    end, function() return V.lag.applied and "Terapkan ulang" or "Terapkan" end, lagApply)
+    local c1 = W.card(p)
+    do
+        local row = W.row(c1, "Gym bot", stateSub("gym", function()
+            return string.format("Level %s · %s", tostring(K.cget("gym", "Level") or "?"), K.gymGet() and "berjalan" or "mati")
+        end), true, 50, 16)
+        W.dot(row, dotOf("gym", function() return K.gymGet() end))
+        local paint = W.switch(row)
+        row.Activated:Connect(function() K.setGym(not K.gymGet()); paint(K.gymGet()) end)
+        reg(function() paint(K.gymGet()) end)
+    end
 
-    btnRow(p, { { "Nyalakan semua", "pri", allOn }, { "Matikan semua", "norm", allOff } })
+    local c2 = W.card(p)
+    do
+        local row = W.row(c2, "Combat tools", stateSub("war", function()
+            return string.format("Parry %s · lock %s", K.warGet("parry") and "aktif" or "mati", K.warGet("lock") and "aktif" or "mati")
+        end), false, 0, 16)
+        W.dot(row, dotOf("war", function() return K.warGet("parry") or K.warGet("lock") end))
+    end
+    W.toggle(c2, "Auto parry", nil, function() return K.warGet("parry") end, function() K.setWar("parry", not K.warGet("parry")) end)
+    W.toggle(c2, "Combat lock", nil, function() return K.warGet("lock") end, function() K.setWar("lock", not K.warGet("lock")) end)
 
-    local c4 = card(p)
+    local c3 = W.card(p)
+    do
+        local row = W.btnRight(c3, "Anti-lag", stateSub("lag", function()
+            if V.lag.running then return "Memproses " .. V.lag.prog .. "%" end
+            if V.lag.applied then return "Aktif · " .. V.lag.hidden .. " part disembunyikan" end
+            return "Belum diterapkan"
+        end), function() return V.lag.applied and "Terapkan ulang" or "Terapkan" end, K.lagApply)
+        W.dot(row, dotOf("lag", function() return V.lag.applied end))
+    end
+
+    W.btnRow(p, { { "Nyalakan semua", "pri", K.allOn }, { "Matikan semua", "norm", K.allOff } })
+
+    local c4 = W.card(p)
     local lh = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c4)
-    padding(lh, 10, 0, 10, 0); vlist(lh, 4)
-    label(lh, "Aktivitas terakhir", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = 1 })
+    padd(lh, 10, 0, 10, 0); vlist(lh, 6)
+    local top = new("Frame", { Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, LayoutOrder = 1 }, lh)
+    label(top, "Aktivitas terakhir", 11, TH.mute, FS, { Size = UDim2.new(0.5, 0, 1, 0) })
+    W.btn(top, "Salin laporan", "norm", K.copyReport, { Size = UDim2.fromOffset(0, 24), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, 0, 0, 0), TextSize = 11 })
     UI.log = label(lh, "", 11.5, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, RichText = true, LayoutOrder = 2 })
     renderLog()
 end
 
 -- ---------- Gym ----------
+BT = "gym"
 do
-    local p = PANES.gym
-    local c1 = card(p)
-    addToggle(c1, "Gym bot", "Angkat beban, pull up, treadmill", gymGet, function() setGym(not gymGet()) end)
+    local p = UI.panes.gym
+    W.banner(p, "gym")
+    local c1 = W.card(p)
+    W.toggle(c1, "Gym bot", "Angkat beban, pull up, treadmill", K.gymGet, function() K.setGym(not K.gymGet()) end)
 
-    local c2 = card(p)
+    local c2 = W.card(p)
     local gh = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c2)
-    padding(gh, 10, 0, 10, 0); vlist(gh, 6)
+    padd(gh, 10, 0, 10, 0); vlist(gh, 6)
     label(gh, "Sesi latihan", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = nextLO() })
-    local setBar = addMeter(gh)
+    local setBar = W.meter(gh)
     local gst = label(gh, "", 12, TH.bone, FB, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
     reg(function()
         local m, g = MOD.gym, V.gym
-        if m.state ~= "ready" then gst.Text = modNote(m); setBar(0, TH.mute); return end
+        if m.state ~= "ready" then gst.Text = K.modNote(m); setBar(0, TH.mute); return end
         if g.maxed then gst.Text = "Stat sudah maksimal"; setBar(100, TH.on)
-        elseif gymGet() and g.gymming then gst.Text = "Sedang latihan · notifikasi gain: " .. g.gains; setBar(60, TH.on)
-        elseif gymGet() then gst.Text = "Bot aktif, menunggu kamu masuk mesin gym"; setBar(0, TH.on)
+        elseif K.gymGet() and g.gymming then gst.Text = "Sedang latihan · notifikasi gain: " .. g.gains; setBar(60, TH.on)
+        elseif K.gymGet() then gst.Text = "Bot aktif, menunggu kamu masuk mesin gym"; setBar(0, TH.on)
         else gst.Text = "Bot mati. Nyalakan lalu berdiri di mesin gym"; setBar(0, TH.mute) end
     end)
 
-    heading(p, "Level latihan")
-    addSeg(p, { "1", "2", "3", "4", "5" }, function() return cget("gym", "Level") end,
-        function(i) local t = CFGT.gym; if t then t.Level = i; log("Level latihan " .. i) else cfgNote() end end)
+    W.heading(p, "Level latihan")
+    W.seg(p, { "1", "2", "3", "4", "5" }, function() return K.cget("gym", "Level") end,
+        function(i) local t = CFGT.gym; if t then t.Level = i; K.saveSoon(); log("Level latihan " .. i) else K.cfgNote() end end)
 
-    local c3 = card(p)
-    addToggle(c3, "Pilih level otomatis", nil, cbool("gym", "AutoLevel"))
-    addToggle(c3, "Mainkan minigame otomatis", nil, cbool("gym", "AutoHit"))
-    addToggle(c3, "Berhenti saat stat maksimal", nil, cbool("gym", "StopOnMax"))
-    addToggle(c3, "Keluar mesin saat maksimal", nil, cbool("gym", "ExitOnMax"))
-    addToggle(c3, "Masuk lagi ke mesin terakhir", nil, cbool("gym", "AutoReenter"))
-    addToggle(c3, "Fast mode", "Hanya angkat beban. Matikan kalau gain tidak masuk.",
+    local c3 = W.card(p)
+    W.toggle(c3, "Pilih level otomatis", nil, K.cbool("gym", "AutoLevel"))
+    W.toggle(c3, "Mainkan minigame otomatis", nil, K.cbool("gym", "AutoHit"))
+    W.toggle(c3, "Berhenti saat stat maksimal", nil, K.cbool("gym", "StopOnMax"))
+    W.toggle(c3, "Keluar mesin saat maksimal", nil, K.cbool("gym", "ExitOnMax"))
+    W.toggle(c3, "Masuk lagi ke mesin terakhir", nil, K.cbool("gym", "AutoReenter"))
+    W.toggle(c3, "Fast mode", "Hanya angkat beban. Matikan kalau gain tidak masuk.",
         function() if not (CFGT.gym and CFGT.game) then return nil end return FAST.on end,
-        function() setFast(not FAST.on); log("Fast mode " .. (FAST.on and "aktif" or "mati")) end)
+        function() K.setFast(not FAST.on); log("Fast mode " .. (FAST.on and "aktif" or "mati")) end)
 
-    local c4 = card(p)
-    addSlider(c4, "Posisi tekan di zona ring", 0, 1, 0.05, "", cnum("gym", "PressAt"))
-    addSlider(c4, "Tekan lebih awal (pull up)", 0, 0.1, 0.01, " dtk", cnum("gym", "PullLead"))
-    addSlider(c4, "Kecepatan tap treadmill", 3, 12, 1, "/dtk", cnum("gym", "TapRate"))
-    addSlider(c4, "Acak jeda tap", 0, 1, 0.05, "", cnum("gym", "TapJitter"))
+    local c4 = W.section(p, "Penyetelan timing", true)
+    W.slider(c4, "Posisi tekan di zona ring", 0, 1, 0.05, "", K.cnum("gym", "PressAt"))
+    W.slider(c4, "Tekan lebih awal (pull up)", 0, 0.1, 0.01, " dtk", K.cnum("gym", "PullLead"))
+    W.slider(c4, "Kecepatan tap treadmill", 3, 12, 1, "/dtk", K.cnum("gym", "TapRate"))
+    W.slider(c4, "Acak jeda tap", 0, 1, 0.05, "", K.cnum("gym", "TapJitter"))
+
+    W.slots(p, "gym")
 end
 
 -- ---------- Combat ----------
+BT = "com"
 do
-    local p = PANES.com
-    local c1 = card(p)
-    addToggle(c1, "Auto parry", nil, function() return warGet("parry") end, function() setWar("parry", not warGet("parry")) end)
-    addToggle(c1, "Combat lock", nil, function() return warGet("lock") end, function() setWar("lock", not warGet("lock")) end)
-    local setChip = addChipRow(c1, "Status", nil)
+    local p = UI.panes.com
+    W.banner(p, "war")
+    local c1 = W.card(p)
+    W.toggle(c1, "Auto parry", nil, function() return K.warGet("parry") end, function() K.setWar("parry", not K.warGet("parry")) end)
+    W.toggle(c1, "Combat lock", nil, function() return K.warGet("lock") end, function() K.setWar("lock", not K.warGet("lock")) end)
+    local setChip = W.chipRow(c1, "Status", nil)
     reg(function()
         if MOD.war.state ~= "ready" then setChip(MOD.war.state == "loading" and "Memuat" or "Tidak tersedia", TH.mute); return end
         local t = V.war.lockTxt
-        if not warGet("lock") then setChip("Lock mati", TH.mute)
-        elseif t:find("COMBAT", 1, true) then setChip("Combat", TH.brand)
+        if not K.warGet("lock") then setChip("Lock mati", TH.mute)
+        elseif t:find("COMBAT", 1, true) then setChip("Combat", TH.err)
         elseif t:find("ACTIVE", 1, true) then setChip("Aktif", TH.on)
         else setChip("Netral", TH.mute) end
     end)
 
-    UI.cs = statGrid(p, { { "ping", "Ping" }, { "p", "Parry" }, { "m", "Miss" }, { "l", "Dipelajari" }, { "w", "Win" } })
+    UI.cs = W.grid(p, { { "ping", "Ping" }, { "p", "Parry" }, { "m", "Miss" }, { "l", "Dipelajari" }, { "w", "Win" } })
     reg(function()
         local w, rdy = V.war, MOD.war.state == "ready"
         UI.cs.ping.Text = rdy and tostring(w.ping) or "--"
@@ -4211,37 +4949,108 @@ do
         UI.cs.w.Text = rdy and (w.w .. "%") or "--"
     end)
 
-    local c2 = card(p)
-    addToggle(c2, "Tetap parry saat memukul", nil, cbool("war", "ParryWhileSwinging"))
-    addToggle(c2, "Belajar dari pemain lain", nil, cbool("war", "LearnFromOthers"))
-    addToggle(c2, "Mode hemat guard", "Lewati animasi baru saat guard rendah", cbool("war", "EcoSkipLow"))
-    addToggle(c2, "Refresh block selama jendela", nil, cbool("war", "HoldRefresh"))
-    addToggle(c2, "Catat penurunan guard di konsol", nil, cbool("war", "GuardLog"))
+    W.heading(p, "Profil")
+    W.seg(p, { WAR_PRESETS[1][1], WAR_PRESETS[2][1], WAR_PRESETS[3][1] }, K.matchPreset, K.applyPreset)
 
-    local c3 = card(p)
-    addSlider(c3, "Tap maksimal (timing dipelajari)", 1, 5, 1, "", cnum("war", "PredTaps"))
-    addSlider(c3, "Tahan setelah hit", 0.02, 0.3, 0.01, " dtk", cnum("war", "HoldTail"))
-    addSlider(c3, "Tahan animasi baru", 0.1, 0.6, 0.05, " dtk", cnum("war", "HoldUnknown"))
-    addSlider(c3, "Tahan serangan heavy", 0.2, 0.9, 0.05, " dtk", cnum("war", "HoldHeavy"))
-    addSlider(c3, "Batas guard mode hemat", 0.1, 0.6, 0.05, "", cnum("war", "EcoGuardLow"))
-    addSlider(c3, "Refresh maksimal per jendela", 0, 4, 1, "", cnum("war", "RefreshMax"))
+    local c2 = W.section(p, "Opsi", true)
+    W.toggle(c2, "Tetap parry saat memukul", nil, K.cbool("war", "ParryWhileSwinging"))
+    W.toggle(c2, "Belajar dari pemain lain", nil, K.cbool("war", "LearnFromOthers"))
+    W.toggle(c2, "Mode hemat guard", "Lewati animasi baru saat guard rendah", K.cbool("war", "EcoSkipLow"))
+    W.toggle(c2, "Refresh block selama jendela", nil, K.cbool("war", "HoldRefresh"))
+    W.toggle(c2, "Mode refresh cycle", "Kirim false lalu true di frame yang sama",
+        function()
+            local v = K.cget("war", "RefreshMode")
+            if v == nil then return nil end
+            return v == "cycle"
+        end,
+        function()
+            local t = CFGT.war
+            if not t then K.cfgNote(); return end
+            t.RefreshMode = (t.RefreshMode == "cycle") and "true" or "cycle"
+            K.saveSoon()
+        end)
+    W.toggle(c2, "Catat guard di konsol", "Berlaku setelah respawn berikutnya", K.cbool("war", "GuardLog"))
 
-    mkBtn(p, "Salin statistik timing", "norm", function()
-        if MOD.war.state ~= "ready" then ready(MOD.war); return end
-        if type(env.WRAITH_DUMP) == "function" then
-            pcall(env.WRAITH_DUMP)
-            toast(HAS.clip and "Statistik timing disalin" or "Statistik timing dicetak ke konsol")
-            log("Statistik timing diambil")
-        else
-            toast("WRAITH_DUMP belum tersedia")
+    local c3 = W.section(p, "Timing lanjutan", false)
+    W.slider(c3, "Tahan setelah hit", 0.02, 0.3, 0.01, " dtk", K.cnum("war", "HoldTail"))
+    W.slider(c3, "Tahan animasi baru", 0.1, 0.6, 0.05, " dtk", K.cnum("war", "HoldUnknown"))
+    W.slider(c3, "Tahan serangan heavy", 0.2, 0.9, 0.05, " dtk", K.cnum("war", "HoldHeavy"))
+    W.slider(c3, "Tahan saat ragdoll", 0.1, 0.6, 0.02, " dtk", K.cnum("war", "HoldRagdoll"))
+    W.slider(c3, "Batas guard mode hemat", 0.1, 0.6, 0.05, "", K.cnum("war", "EcoGuardLow"))
+    W.slider(c3, "Refresh per jendela (baru)", 0, 4, 1, "", K.cnum("war", "RefreshMax"))
+    W.slider(c3, "Refresh per jendela (dipelajari)", 0, 3, 1, "", K.cnum("war", "PredRefresh"))
+    W.slider(c3, "Sampel minimal sebelum prediksi", 1, 5, 1, "", K.cnum("war", "MinSamples"))
+    W.slider(c3, "Jeda minimal antar request", 0.02, 0.3, 0.01, " dtk", K.cnum("war", "RefireGap"))
+
+    local c4 = W.section(p, "Statistik timing", false)
+    do
+        local box = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c4)
+        padd(box, 10, 0, 10, 0); vlist(box, 6)
+        label(box, "Keberhasilan per lead (makin tinggi makin sering dipilih)", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = nextLO() })
+        local rows = {}
+        for i = 1, 6 do
+            local r = new("Frame", { Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, LayoutOrder = nextLO(), Visible = false }, box)
+            local nm = label(r, "", 12, TH.bone, FB, { Size = UDim2.fromOffset(46, 22) })
+            local tk = new("Frame", { Position = UDim2.fromOffset(50, 8), Size = UDim2.new(1, -140, 0, 6), BackgroundColor3 = WHITE, BackgroundTransparency = 0.88, BorderSizePixel = 0 }, r)
+            corner(tk, 3)
+            local fl = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = TH.mute, BorderSizePixel = 0 }, tk)
+            corner(fl, 3)
+            local pc = label(r, "", 12, TH.amb, FD, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -44, 0, 0), Size = UDim2.fromOffset(40, 22), TextXAlignment = Enum.TextXAlignment.Right })
+            local nn = label(r, "", 11, TH.mute, FS, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Size = UDim2.fromOffset(44, 22), TextXAlignment = Enum.TextXAlignment.Right })
+            rows[i] = { r = r, nm = nm, fl = fl, pc = pc, nn = nn }
         end
-    end, { Size = UDim2.new(1, 0, 0, 38), LayoutOrder = nextLO() })
+        local sum = label(box, "", 12, TH.bone, FB, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
+        local note = label(box, "", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
+        local lastCalc = 0
+        reg(function()
+            if os.clock() - lastCalc < 1 then return end
+            lastCalc = os.clock()
+            if MOD.war.state ~= "ready" or not (WI.lead and WI.hd and CFGT.war) then
+                for _, r in ipairs(rows) do r.r.Visible = false end
+                sum.Text = "Data timing belum tersedia."
+                note.Text = CAP.upvalues and "Menunggu modul Combat siap." or "Executor tidak punya debug.getupvalues, jadi statistik tidak bisa dibaca."
+                return
+            end
+            local st = K.calcStats()
+            for i, r in ipairs(rows) do
+                local d = st.lead[i]
+                r.r.Visible = d ~= nil
+                if d then
+                    r.nm.Text = string.format("%.2fs", d.v)
+                    r.pc.Text = string.format("%d%%", math.floor(d.mean * 100 + 0.5))
+                    r.nn.Text = "n~" .. math.floor(d.n + 0.5)
+                    local best = (i == st.best)
+                    r.fl.BackgroundColor3 = best and TH.on or TH.mute
+                    r.fl.Size = UDim2.new(d.mean, 0, 1, 0)
+                end
+            end
+            sum.Text = string.format("%d animasi dipelajari dari %d · %d bersampel kecil (n<=2) · %d sudah penuh", st.learned, st.total, st.low, st.capped)
+            note.Text = st.zero and "Entri Animation#0 kemungkinan campuran beberapa serangan tanpa ID, jadi rata-ratanya kurang akurat." or ""
+        end)
+        W.btnRow(box, {
+            { "Bersihkan n<=2", "dng", K.cleanHD, 1, true },
+            { "Reset lead", "dng", K.resetLead, 1, true },
+            { "Reset timing", "dng", K.resetHD, 1, true },
+        })
+        W.btn(box, "Salin statistik mentah", "norm", function()
+            if type(env.WRAITH_DUMP) == "function" then
+                pcall(env.WRAITH_DUMP)
+                toast(CAP.clipboard and "Statistik timing disalin" or "Statistik timing dicetak ke konsol", "ok")
+            else
+                toast("WRAITH_DUMP belum tersedia", "warn")
+            end
+        end, { Size = UDim2.new(1, 0, 0, 34), LayoutOrder = nextLO(), TextSize = 12 })
+    end
+
+    W.slots(p, "war")
 end
 
 -- ---------- Anti-lag ----------
+BT = "lag"
 do
-    local p = PANES.lag
-    local g = statGrid(p, { { "b", "Sebelum" }, { "a", "Sesudah" } })
+    local p = UI.panes.lag
+    W.banner(p, "lag")
+    local g = W.grid(p, { { "b", "Sebelum" }, { "a", "Sesudah" } })
     reg(function()
         local l, rdy = V.lag, MOD.lag.state == "ready"
         g.b.Text = (rdy and l.before) and tostring(l.before) or "--"
@@ -4250,14 +5059,14 @@ do
         g.b.TextColor3 = (rdy and l.before) and col(l.before) or TH.bone
     end)
 
-    local c1 = card(p)
-    local setChip = addChipRow(c1, "Status", function()
-        if MOD.lag.state ~= "ready" then return modNote(MOD.lag) end
+    local c1 = W.card(p)
+    local setChip = W.chipRow(c1, "Status", function()
+        if MOD.lag.state ~= "ready" then return K.modNote(MOD.lag) end
         return V.lag.applied and (V.lag.hidden .. " part disembunyikan") or "Belum ada perubahan"
     end)
     local mh = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, c1)
-    padding(mh, 0, 0, 12, 0); vlist(mh, 0)
-    local setBar = addMeter(mh)
+    padd(mh, 0, 0, 12, 0); vlist(mh, 0)
+    local setBar = W.meter(mh)
     reg(function()
         local m, l = MOD.lag, V.lag
         if m.state == "gone" then setChip("Dilepas", TH.mute); setBar(0, TH.mute); return end
@@ -4268,102 +5077,157 @@ do
         else setChip("Siap", TH.mute); setBar(0, TH.mute) end
     end)
 
-    btnRow(p, { { "Terapkan", "pri", lagApply, 2 }, { "Pulihkan", "norm", lagRestore, 1 }, { "Lepas", "dng", lagUnload, 1 } })
-    reg(function() end)
+    W.btnRow(p, { { "Terapkan", "pri", K.lagApply, 2 }, { "Pulihkan", "norm", K.lagRestore, 1 }, { "Lepas", "dng", K.lagUnload, 1 } })
 
-    heading(p, "Preset")
-    addSeg(p, { "Aman", "Seimbang", "Maksimal" }, function() return nil end, function(i) lagPreset(({ "SAFE", "BALANCED", "MAX" })[i]) end)
+    W.heading(p, "Preset")
+    W.seg(p, { "Aman", "Seimbang", "Maksimal" }, function() return nil end,
+        function(i) K.lagPreset(({ "SAFE", "BALANCED", "MAX" })[i]) end)
 
-    local c2 = card(p)
-    addSlider(c2, "Batas FPS", 30, 300, 5, "",
-        function() return lagSlGet("FPS Cap (bypass)") end,
-        function(v, final) lagSlSet("FPS Cap (bypass)", 30, 300, 5, v, final) end)
-    addSlider(c2, "Jarak render", 64, 1024, 64, "",
-        function() return lagSlGet("Render Distance") end,
-        function(v, final) lagSlSet("Render Distance", 64, 1024, 64, v, final) end)
+    local c2 = W.card(p)
+    W.slider(c2, "Batas FPS", 30, 300, 5, "",
+        function() return K.lagSlGet("FPS Cap (bypass)") end,
+        function(v, final) K.lagSlSet("FPS Cap (bypass)", 30, 300, 5, v, final) end)
+    W.slider(c2, "Jarak render", 64, 1024, 64, "",
+        function() return K.lagSlGet("Render Distance") end,
+        function(v, final) K.lagSlSet("Render Distance", 64, 1024, 64, v, final) end)
 
-    local c3 = card(p)
+    local c3 = W.card(p)
     local names = { "Hapus tekstur", "Matikan bayangan", "Matikan efek post", "Sembunyikan daun", "Matikan partikel dan FX",
         "Anchor part", "Matikan skybox", "Mode agresif", "FPS adaptif", "Terapkan otomatis" }
+    local subs = {
+        ["Hide Leaves"] = "Risiko: part bernama grass, tree, plant bisa jadi tembus",
+        ["Aggressive"] = "Mematikan constraint dan ClickDetector non-karakter",
+        ["Anchor Parts"] = "Part yang tidak terlindungi dikunci di tempat",
+    }
     for i, key in ipairs(LAG_TOGGLES) do
-        addToggle(c3, names[i], nil, function() return lagTgGet(key) end, function() lagTgFlip(key) end)
+        W.toggle(c3, names[i], subs[key], function() return K.lagTgGet(key) end, function() K.lagTgFlip(key) end)
     end
 end
 
--- ---------- Pengaturan ----------
-local SET = { op = 74, sc = 100 }
-local FABPOS = UDim2.fromOffset(12, 96)
-local fab, setRing, setOpen, OPEN
+-- ---------- Setelan ----------
+BT = "cfg"
+local BIND = { id = nil }
 do
-    local p = PANES.cfg
-    local c1 = card(p)
-    addSlider(c1, "Transparansi jendela", 30, 95, 1, "%", function() return SET.op end,
-        function(v) SET.op = v; win.BackgroundTransparency = 1 - v / 100 end)
-    addSlider(c1, "Ukuran jendela", 70, 130, 5, "%", function() return SET.sc end,
+    local p = UI.panes.cfg
+    local c1 = W.card(p)
+    W.slider(c1, "Transparansi jendela", 30, 95, 1, "%", function() return S.op end,
         function(v, final)
-            SET.sc = v
-            if final then wscale.Scale = v / 100; applyLayout() end
+            S.op = v; UI.win.BackgroundTransparency = 1 - v / 100
+            if final then K.saveSoon() end
         end)
-
-    heading(p, "Warna aksen")
-    local sw = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, LayoutOrder = nextLO() }, p)
-    hlist(sw, 8)
-    local accents = { Color3.fromRGB(255, 77, 94), Color3.fromRGB(155, 123, 255), Color3.fromRGB(54, 209, 224), Color3.fromRGB(255, 181, 71) }
-    for i, c in ipairs(accents) do
-        local b = new("TextButton", { Size = UDim2.new(0.25, -6, 1, 0), BackgroundColor3 = c, Text = "", AutoButtonColor = false, BorderSizePixel = 0, LayoutOrder = i }, sw)
-        corner(b, 8)
-        b.Activated:Connect(function()
-            TH.brand = c
-            for _, f in ipairs(THF) do pcall(f) end
-            for _, f in ipairs(REF) do pcall(f) end
-            renderLog()
+    W.slider(c1, "Ukuran jendela", 70, 130, 5, "%", function() return S.sc end,
+        function(v, final)
+            S.sc = v
+            if final then UI.wscale.Scale = v / 100; applyLayout(); K.saveSoon() end
         end)
-    end
+    W.toggle(c1, "Animasi", "Transisi tab, toggle, dan notifikasi",
+        function() return S.motion end, function() S.motion = not S.motion; K.saveSoon() end)
 
-    local c2 = card(p)
+    W.heading(p, "Warna aksen")
     do
-        local row = makeRow(c2, "Buka atau tutup hub", "Keyboard", false, 110)
-        local chip = new("Frame", { Size = UDim2.fromOffset(0, 22), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0), BackgroundTransparency = 1 }, row)
-        corner(chip, 11); stroke(chip, WHITE, 1, 0.85); padding(chip, 0, 10, 0, 10)
-        label(chip, "RightAlt", 11, TH.mute, FD, { Size = UDim2.fromOffset(0, 22), AutomaticSize = AUTO_X, TextXAlignment = CENTER })
+        local sw = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, LayoutOrder = nextLO() }, p)
+        hlist(sw, 6)
+        local n = #ACCENTS
+        local marks = {}
+        for i, a in ipairs(ACCENTS) do
+            local b = new("TextButton", { Size = UDim2.new(1 / n, -6 * (n - 1) / n, 1, 0), BackgroundColor3 = a[2], Text = "", AutoButtonColor = false,
+                BorderSizePixel = 0, LayoutOrder = i }, sw)
+            corner(b, 8)
+            local ring = stroke(b, WHITE, 2, 1)
+            marks[i] = ring
+            b.Activated:Connect(function()
+                S.accent = i; TH.brand = a[2]
+                for _, f in ipairs(THF) do pcall(f) end
+                for _, r in ipairs(REF) do runR(r, true) end
+                renderLog(); K.saveSoon()
+            end)
+        end
+        reg(function() for i, r in ipairs(marks) do r.Transparency = (i == S.accent) and 0 or 1 end end)
     end
-    makeRow(c2, "Tombol bulat", "Ketuk untuk buka tutup, tarik untuk pindah", false, 0)
 
-    btnRow(p, {
-        { "Reset posisi", "norm", function() clampTo(win, 40, 24); clampTo(fab, 12, 96) end },
-        { "Matikan semua", "dng", allOff },
+    local c2 = W.section(p, "Hotkey", false)
+    do
+        local items = { { "hub", "Buka atau tutup hub" }, { "gym", "Gym bot" }, { "parry", "Auto parry" }, { "lock", "Combat lock" }, { "lag", "Anti-lag" } }
+        local chips = {}
+        for _, it in ipairs(items) do
+            local row = W.row(c2, it[2], nil, false, 110)
+            local b = W.btn(row, "", "norm", function()
+                BIND.id = (BIND.id == it[1]) and nil or it[1]
+            end, { Size = UDim2.fromOffset(0, 26), AutomaticSize = AUTO_X, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0), TextSize = 11 })
+            padd(b, 0, 10, 0, 10)
+            chips[it[1]] = b
+        end
+        reg(function()
+            for id, b in pairs(chips) do b.Text = (BIND.id == id) and "tekan tombol…" or S.hk[id] end
+        end)
+        local hint = label(c2, "Ketuk tombol lalu tekan tombol baru. Escape membatalkan.", 11, TH.mute, FS,
+            { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
+        padd(hint, 8, 0, 10, 0)
+    end
+
+    local c3 = W.section(p, "Perilaku", false)
+    W.toggle(c3, "Redam hotkey bawaan", "RightShift dan RightControl dari script asli dimatikan",
+        function() return S.mute end,
+        function()
+            S.mute = not S.mute
+            if S.mute then
+                for _, k in ipairs({ "gym", "war", "lag" }) do if MOD[k].state == "ready" then K.muteKeys(k) end end
+            else
+                K.unmuteAll()
+            end
+            K.saveSoon()
+        end)
+    W.toggle(c3, "Matikan Hide Leaves otomatis", "Saat anti-lag terhubung, cegah risiko tembus lantai",
+        function() return S.leafGuard end, function() S.leafGuard = not S.leafGuard; K.saveSoon() end)
+    W.toggle(c3, "Simpan otomatis", "Konfigurasi ke SIFB_config.json",
+        function() return S.autosave end, function() S.autosave = not S.autosave; K.saveSoon() end)
+
+    local c4 = W.section(p, "Diagnostik", false)
+    do
+        local function diag(title, fn)
+            local set = W.chipRow(c4, title, nil)
+            reg(function() local ok, txt = fn(); set(txt, ok and TH.on or TH.mute) end)
+        end
+        diag("Executor", function() return true, EXEC:sub(1, 22) end)
+        for _, k in ipairs({ "loadstring", "firesignal", "getconnections", "getgc", "upvalues", "debuginfo", "file", "clipboard" }) do
+            diag(k, function() return CAP[k], CAP[k] and "ada" or "tidak ada" end)
+        end
+        for _, k in ipairs({ "gym", "war", "lag" }) do
+            diag("Modul " .. MOD[k].label, function() return MOD[k].state == "ready", MOD[k].state end)
+        end
+        diag("CFG gym / war", function() return CFGT.gym ~= nil and CFGT.war ~= nil, (CFGT.gym and "gym " or "-- ") .. (CFGT.war and "war" or "--") end)
+        diag("Data timing Wraith", function() return WI.lead ~= nil and WI.hd ~= nil, WI.hd and "terbaca" or "tidak" end)
+        diag("Hotkey diredam", function() return #MUTED > 0, tostring(#MUTED) end)
+        diag("Slider anti-lag", function() return #MOD.lag.ended > 0, #MOD.lag.ended > 0 and "siap" or "tidak" end)
+        W.btn(c4, "Salin laporan diagnostik", "norm", K.copyReport, { Size = UDim2.new(1, 0, 0, 34), LayoutOrder = nextLO(), TextSize = 12 })
+        local sp = new("Frame", { Size = UDim2.new(1, 0, 0, 10), BackgroundTransparency = 1, LayoutOrder = nextLO() }, c4)
+    end
+
+    W.btnRow(p, {
+        { "Simpan sekarang", "norm", function() K.saveNow(); say("ok", CAP.file and "Konfigurasi disimpan" or "Executor tanpa writefile") end },
+        { "Reset posisi", "norm", function() clampTo(UI.win, 40, 24); clampTo(UI.fab, 12, 96); clampTo(UI.mini, 64, 100); S.wp, S.fp, S.mp = nil, nil, nil; K.saveSoon() end },
     })
+    W.btnRow(p, {
+        { "Reset konfigurasi", "dng", function()
+            S.gym, S.war, S.slots = {}, {}, { gym = {}, war = {} }
+            K.saveNow(); say("warn", "Konfigurasi modul direset, berlaku saat execute berikutnya")
+        end, 1, true },
+        { "Tutup hub", "norm", function() env.__SIFB_STOP() end },
+    })
+    W.btnRow(p, { { "Matikan semua dan tutup", "dng", K.shutdownAll, 1, true } })
 
-    local c3 = card(p)
-    makeRow(c3, "Skill issue final boss", "By Duke · tiga sistem asli tetap utuh, hub hanya mengendalikannya", false, 0)
+    local c5 = W.card(p)
+    W.row(c5, "Skill issue final boss v" .. VERSION, "By Duke · tiga sistem asli tetap utuh, hub hanya mengendalikannya", false, 0)
 end
+BT = nil
 
 -- =====================================================================
---  TAB, TOMBOL BULAT, DRAG
+--  TOMBOL BULAT, MODE RINGKAS, HOTKEY
 -- =====================================================================
-for i, t in ipairs(TABS) do
-    local b = new("TextButton", { Size = UDim2.new(1 / #TABS, 0, 1, -1), Position = UDim2.new((i - 1) / #TABS, 0, 0, 0), BackgroundTransparency = 1,
-        Text = t[2], TextSize = 12, Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, tabBar)
-    local ul = new("Frame", { Size = UDim2.new(1, -12, 0, 2), Position = UDim2.new(0, 6, 1, -2), BackgroundColor3 = TH.brand, BorderSizePixel = 0, BackgroundTransparency = 1 }, b)
-    b.Activated:Connect(function()
-        curTab = t[1]
-        for id, pn in pairs(PANES) do pn.Visible = (id == curTab) end
-    end)
-    TABBTN[t[1]] = { b = b, ul = ul }
-end
-reg(function()
-    for id, o in pairs(TABBTN) do
-        local on = id == curTab
-        o.b.TextColor3 = on and TH.bone or TH.mute
-        o.ul.BackgroundTransparency = on and 0 or 1
-        o.ul.BackgroundColor3 = TH.brand
-    end
-end)
-
--- tombol bulat dengan cincin progres (n/3 sistem aktif)
-fab = new("TextButton", { Name = "Fab", Size = UDim2.fromOffset(44, 44), Position = FABPOS, BackgroundTransparency = 1, Text = "",
-    AutoButtonColor = false, BorderSizePixel = 0, ZIndex = 5 }, ROOT)
+UI.fab = new("TextButton", { Name = "Fab", Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(12, 96), BackgroundTransparency = 1,
+    Text = "", AutoButtonColor = false, BorderSizePixel = 0, ZIndex = 5 }, ROOT)
 do
+    local fab = UI.fab
     local base = new("Frame", { Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(3, 3), BackgroundTransparency = 1 }, fab)
     corner(base, 19); stroke(base, WHITE, 3, 0.84)
     local seq = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.5, 0),
@@ -4380,55 +5244,129 @@ do
     local inner = new("Frame", { Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(5, 5), BackgroundColor3 = TH.ink, BackgroundTransparency = 0.12, BorderSizePixel = 0 }, fab)
     corner(inner, 17)
     UI.fabTxt = label(inner, "SI", 14, TH.bone, FD, { Size = UDim2.new(1, 0, 1, 0), TextXAlignment = CENTER })
-    setRing = function(p)
+    function UI.setRing(p)
         local ang = math.clamp(p, 0, 1) * 360
         gR.Rotation = math.clamp(ang, 0, 180)
         gL.Rotation = math.clamp(ang, 180, 360)
     end
 end
 
-OPEN = true
-setOpen = function(o)
+function K.setOpen(o)
     OPEN = o
     if o then
-        win.Visible = true
-        TweenService:Create(win, TweenInfo.new(0.16), { GroupTransparency = 0 }):Play()
+        UI.win.Visible = true
+        tw(UI.win, 0.16, { GroupTransparency = 0 })
+        for _, r in ipairs(REF) do runR(r) end
     else
-        TweenService:Create(win, TweenInfo.new(0.16), { GroupTransparency = 1 }):Play()
-        task.delay(0.17, function() if not OPEN then win.Visible = false end end)
+        tw(UI.win, 0.16, { GroupTransparency = 1 })
+        task.delay(0.17, function() if not OPEN then UI.win.Visible = false end end)
     end
 end
-minBtn.Activated:Connect(function() setOpen(false) end)
 
-local function startDrag(obj, input, onTap)
-    local sx, sy = input.Position.X, input.Position.Y
-    local ox, oy = obj.Position.X.Offset, obj.Position.Y.Offset
-    local moved = false
-    DRAG = {
-        move = function(p)
-            local dx, dy = p.X - sx, p.Y - sy
-            if not moved and math.abs(dx) + math.abs(dy) < 8 then return end
-            moved = true
-            clampTo(obj, ox + dx, oy + dy)
-        end,
-        stop = function() if not moved and onTap then onTap() end end,
-    }
+-- HUD mini: tiga toggle dan satu tombol anti-lag dalam satu strip
+UI.mini = new("Frame", { Name = "Mini", Size = UDim2.fromOffset(296, 38), Position = UDim2.fromOffset(64, 100), BackgroundColor3 = TH.ink,
+    BackgroundTransparency = 0.18, BorderSizePixel = 0, Visible = false, Active = true }, ROOT)
+corner(UI.mini, 12); stroke(UI.mini, WHITE, 1, 0.88)
+do
+    local specs = { { "GYM", "gym" }, { "PRY", "parry" }, { "LCK", "lock" }, { "LAG", "lag" } }
+    local chips = {}
+    for i, s in ipairs(specs) do
+        local b = new("TextButton", { Size = UDim2.fromOffset(46, 26), Position = UDim2.fromOffset(8 + (i - 1) * 50, 6), BackgroundColor3 = WHITE,
+            BackgroundTransparency = 0.92, Text = s[1], TextSize = 11, Font = FD, TextColor3 = TH.mute, AutoButtonColor = false, BorderSizePixel = 0 }, UI.mini)
+        corner(b, 8)
+        b.Activated:Connect(function()
+            if os.clock() - LASTDRAG < 0.25 then return end
+            if s[2] == "gym" then K.setGym(not K.gymGet())
+            elseif s[2] == "parry" then K.setWar("parry", not K.warGet("parry"))
+            elseif s[2] == "lock" then K.setWar("lock", not K.warGet("lock"))
+            elseif V.lag.applied then K.lagRestore() else K.lagApply() end
+        end)
+        chips[s[2]] = b
+    end
+    UI.mfps = label(UI.mini, "-- fps", 11, TH.on, FD, { Position = UDim2.fromOffset(212, 0), Size = UDim2.fromOffset(46, 38), TextXAlignment = CENTER })
+    W.iconBtn(UI.mini, "expand", UDim2.fromOffset(260, 5), function() K.setMini(false); K.setOpen(true) end)
+    reg(function()
+        local st = { gym = K.gymGet() == true, parry = K.warGet("parry") == true, lock = K.warGet("lock") == true, lag = V.lag.applied and MOD.lag.state == "ready" }
+        for k, b in pairs(chips) do
+            b.BackgroundColor3 = st[k] and TH.on or WHITE
+            b.BackgroundTransparency = st[k] and 0 or 0.92
+            b.TextColor3 = st[k] and TH.dark or TH.mute
+        end
+        UI.mfps.Text = V.sys.fps .. " fps"; UI.mfps.TextColor3 = col(V.sys.fps)
+    end, true)
+    UI.mini.InputBegan:Connect(function(i)
+        if isPtr(i) then
+            W.startDrag(UI.mini, i, nil, nil, function()
+                S.mp = { x = UI.mini.Position.X.Offset, y = UI.mini.Position.Y.Offset }; K.saveSoon()
+            end)
+        end
+    end)
 end
-hd.InputBegan:Connect(function(i) if isPtr(i) then startDrag(win, i) end end)
-fab.InputBegan:Connect(function(i) if isPtr(i) then startDrag(fab, i, function() setOpen(not OPEN) end) end end)
 
+function K.setMini(on)
+    MINI = on
+    S.mini = on
+    UI.mini.Visible = on
+    if on then K.setOpen(false) end
+    K.saveSoon()
+end
+
+UI.hd.InputBegan:Connect(function(i)
+    if isPtr(i) then
+        W.startDrag(UI.win, i, nil, nil, function()
+            S.wp = { x = UI.win.Position.X.Offset, y = UI.win.Position.Y.Offset }; K.saveSoon()
+        end)
+    end
+end)
+W.iconBtn(UI.hd, "compact", UDim2.new(1, -76, 0, 11), function() K.setMini(true) end)
+W.iconBtn(UI.hd, "min", UDim2.new(1, -40, 0, 11), function() K.setOpen(false) end)
+
+UI.fab.InputBegan:Connect(function(i)
+    if isPtr(i) then
+        W.startDrag(UI.fab, i,
+            function()
+                if MINI then K.setMini(false); K.setOpen(true) else K.setOpen(not OPEN) end
+            end,
+            function() K.setMini(not MINI); if not MINI then K.setOpen(true) end end,
+            function() S.fp = { x = UI.fab.Position.X.Offset, y = UI.fab.Position.Y.Offset }; K.saveSoon() end)
+    end
+end)
+
+-- hotkey (bisa diatur di Setelan)
 track(UIS.InputBegan:Connect(function(i, gp)
-    if not gp and i.KeyCode == Enum.KeyCode.RightAlt then setOpen(not OPEN) end
+    if i.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if BIND.id then
+        if i.KeyCode == Enum.KeyCode.Escape then
+            BIND.id = nil
+        elseif i.KeyCode ~= Enum.KeyCode.Unknown then
+            local id, newK = BIND.id, i.KeyCode.Name
+            for other, kn in pairs(S.hk) do
+                if other ~= id and kn == newK then S.hk[other] = S.hk[id] end
+            end
+            S.hk[id] = newK
+            BIND.id = nil
+            K.saveSoon()
+            toast("Hotkey " .. id .. " = " .. newK, "ok")
+        end
+        return
+    end
+    if gp then return end
+    local n = i.KeyCode.Name
+    if n == S.hk.hub then
+        if MINI then K.setMini(false); K.setOpen(true) else K.setOpen(not OPEN) end
+    elseif n == S.hk.gym then K.setGym(not K.gymGet())
+    elseif n == S.hk.parry then K.setWar("parry", not K.warGet("parry"))
+    elseif n == S.hk.lock then K.setWar("lock", not K.warGet("lock"))
+    elseif n == S.hk.lag then
+        if V.lag.applied then K.lagRestore() else K.lagApply() end
+    end
 end))
 
--- header, cincin, dan statistik Beranda (diperbarui berkala)
+-- header, cincin, dan label (selalu diperbarui, walau jendela tertutup)
 reg(function()
     local f = V.sys.fps
     UI.hfps.Text = f .. " fps"; UI.hfps.TextColor3 = col(f)
-    UI.hs.fps.Text = tostring(f); UI.hs.fps.TextColor3 = col(f)
-    UI.hs.ping.Text = tostring(math.floor(V.sys.ping))
-    UI.hs.mem.Text = tostring(math.floor(V.sys.mem))
-    local on = { gymGet() == true, (warGet("parry") == true) or (warGet("lock") == true), MOD.lag.state == "ready" and V.lag.applied }
+    local on = { K.gymGet() == true, (K.warGet("parry") == true) or (K.warGet("lock") == true), MOD.lag.state == "ready" and V.lag.applied }
     local n = 0
     for i, s in ipairs(UI.segs) do
         if on[i] then n = n + 1 end
@@ -4436,37 +5374,50 @@ reg(function()
         s.BackgroundTransparency = on[i] and 0 or 0.88
     end
     UI.sub.Text = "By Duke · " .. n .. "/3 aktif"
-    setRing(n / 3)
-    UI.fabTxt.TextColor3 = OPEN and TH.brand or TH.bone
-end)
+    UI.setRing(n / 3)
+    UI.fabTxt.TextColor3 = (OPEN or MINI) and TH.brand or TH.bone
+end, true)
 
 applyLayout()
-clampTo(win, (vp().X - WIN.w) / 2, 24)
-clampTo(fab, 12, 96)
+if S.wp then clampTo(UI.win, S.wp.x, S.wp.y) else clampTo(UI.win, (vp().X - WIN.w) / 2, 24) end
+if S.fp then clampTo(UI.fab, S.fp.x, S.fp.y) else clampTo(UI.fab, 12, 96) end
+if S.mp then clampTo(UI.mini, S.mp.x, S.mp.y) else clampTo(UI.mini, 64, 100) end
 if workspace.CurrentCamera then
     track(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-        applyLayout(); clampTo(fab, fab.Position.X.Offset, fab.Position.Y.Offset)
+        applyLayout(); clampTo(UI.fab, UI.fab.Position.X.Offset, UI.fab.Position.Y.Offset)
+        clampTo(UI.mini, UI.mini.Position.X.Offset, UI.mini.Position.Y.Offset)
     end))
 end
+UI.ready = true
+if S.mini then K.setMini(true) end
 
 -- =====================================================================
 --  JALANKAN
 -- =====================================================================
 log("Memuat tiga sistem…")
-if not findGymBtn() then loadMod("gym") end
-if not env.__WRAITH12 then loadMod("war") end
-loadMod("lag")
+if not K.findGymBtn() then K.loadMod("gym") end
+if not env.__WRAITH12 then K.loadMod("war") end
+K.loadMod("lag")
 
 task.spawn(function()
-    local warned = false
+    local tick, warned = 0, false
     while alive do
         task.wait(0.25)
-        for _, fn in ipairs({ pollSys, pollGym, pollWar, pollLag }) do
+        tick = tick + 1
+        for _, fn in ipairs({ K.pollGym, K.pollWar, K.pollLag }) do
             local ok, e = pcall(fn)
-            if not ok and not warned then warned = true; warn("[SIFB] " .. tostring(e)) end
+            if not ok and not warned then warned = true; log("Poll: " .. tostring(e), "err") end
         end
-        for _, f in ipairs(REF) do pcall(f) end
+        if tick % 4 == 0 then
+            pcall(K.pollSys)
+            if MOD.war.state == "ready" and CAP.upvalues and not (WI.lead and WI.hd) and (WI.tries or 0) < 12 then
+                WI.tries = (WI.tries or 0) + 1
+                K.warInternals()
+            end
+        end
+        for _, r in ipairs((OPEN) and REF or REFC) do runR(r) end
+        if tick % 8 == 0 and DIRTY and S.autosave then K.saveNow() end
     end
 end)
 
-print("[SIFB] Skill issue final boss | By Duke | RightAlt = buka/tutup")
+print("[SIFB v" .. VERSION .. "] Skill issue final boss | By Duke | " .. S.hk.hub .. " = buka/tutup")
