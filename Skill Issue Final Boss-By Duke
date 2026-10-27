@@ -1,5 +1,5 @@
 --[[
-  SKILL ISSUE FINAL BOSS v1.2  |  By Duke
+  SKILL ISSUE FINAL BOSS v1.3  |  By Duke
 
   Satu hub untuk tiga sistem:
     1. Gym bot       (auto gym, High School Anime)
@@ -3229,7 +3229,7 @@ print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", 
 -- =====================================================================
 --  DASAR
 -- =====================================================================
-local VERSION = "1.2"
+local VERSION = "1.3"
 
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
@@ -3269,6 +3269,8 @@ local CAP = {
     debuginfo      = type(debug) == "table" and type(debug.info) == "function",
     file           = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function",
     clipboard      = type(setclipboard) == "function",
+    setfpscap      = type(setfpscap) == "function",
+    hiddenprop     = type(sethiddenproperty) == "function" and type(gethiddenproperty) == "function",
 }
 local EXEC = "tidak diketahui"
 pcall(function()
@@ -3343,6 +3345,7 @@ local S = {
     mini = false, fx = true, intro = true,
     hk = { hub = "RightAlt", gym = "F1", parry = "F2", lock = "F3", lag = "F4" },
     wp = nil, fp = nil, mp = nil,
+    bst = { cap = 2, unlock = false, quality = false, light = false, mute = false, far = false, dist = 120 },
     gym = {}, war = {}, slots = { gym = {}, war = {} },
 }
 local DIRTY = false
@@ -3380,6 +3383,13 @@ local function loadSettings()
                 if type(sl[i]) == "table" then S.slots[g][i] = cleanCfg(sl[i], KEYS[g]) end
             end
         end
+    end
+    if type(d.bst) == "table" then
+        for _, k in ipairs({ "unlock", "quality", "light", "mute", "far" }) do
+            if type(d.bst[k]) == "boolean" then S.bst[k] = d.bst[k] end
+        end
+        if type(d.bst.cap) == "number" then S.bst.cap = math.clamp(math.floor(d.bst.cap), 1, 5) end
+        if type(d.bst.dist) == "number" then S.bst.dist = math.clamp(d.bst.dist, 60, 300) end
     end
 end
 loadSettings()
@@ -4244,12 +4254,197 @@ function K.copyReport()
     end
 end
 
+-- =====================================================================
+--  ANTI-LAG PLUS (sisi hub; tidak menyentuh script Nono)
+-- =====================================================================
+local CAPS = { 60, 120, 165, 240, 0 } -- 0 = tanpa batas
+local BOOST = { render3d = false, orig = {}, far = setmetatable({}, { __mode = "k" }) }
+local FT = { buf = {}, n = 0 }
+track(RunService.RenderStepped:Connect(function(dt)
+    FT.n = FT.n % 600 + 1
+    FT.buf[FT.n] = dt
+end))
+
+-- statistik frame time: rata-rata, 1% low, terendah, tertinggi
+function K.fpsStats()
+    local c = #FT.buf
+    if c < 30 then return nil end
+    local arr, sum = {}, 0
+    for i = 1, c do local d = FT.buf[i]; arr[i] = d; sum = sum + d end
+    table.sort(arr)
+    local lowN = math.max(1, math.floor(c * 0.01))
+    local ls = 0
+    for i = c - lowN + 1, c do ls = ls + arr[i] end
+    return { avg = c / sum, min = 1 / math.max(arr[c], 1e-4), max = 1 / math.max(arr[1], 1e-4), low1 = lowN / math.max(ls, 1e-4) }
+end
+
+function K.setCap()
+    if not CAP.setfpscap then return false end
+    return (pcall(setfpscap, CAPS[S.bst.cap] or 120))
+end
+
+local BOOST_FX = {}
+BOOST_FX.unlock = {
+    on = function()
+        if not CAP.setfpscap then return false, "Executor tanpa setfpscap" end
+        return K.setCap()
+    end,
+    off = function() if CAP.setfpscap then pcall(setfpscap, 60) end return true end,
+}
+BOOST_FX.render3d = {
+    on = function() return pcall(function() RunService:Set3dRenderingEnabled(false) end) end,
+    off = function() return pcall(function() RunService:Set3dRenderingEnabled(true) end) end,
+}
+BOOST_FX.quality = {
+    on = function()
+        local ok = pcall(function()
+            local r = settings().Rendering
+            BOOST.orig.quality = r.QualityLevel
+            r.QualityLevel = Enum.QualityLevel.Level01
+        end)
+        pcall(function()
+            local gs = UserSettings():GetService("UserGameSettings")
+            BOOST.orig.saved = gs.SavedQualityLevel
+            gs.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
+        end)
+        return ok
+    end,
+    off = function()
+        pcall(function() if BOOST.orig.quality then settings().Rendering.QualityLevel = BOOST.orig.quality end end)
+        pcall(function() if BOOST.orig.saved then UserSettings():GetService("UserGameSettings").SavedQualityLevel = BOOST.orig.saved end end)
+        return true
+    end,
+}
+BOOST_FX.light = {
+    on = function()
+        if not CAP.hiddenprop then return false, "Executor tanpa sethiddenproperty" end
+        local L = game:GetService("Lighting")
+        return (pcall(function()
+            BOOST.orig.tech = gethiddenproperty(L, "Technology")
+            sethiddenproperty(L, "Technology", Enum.Technology.Compatibility)
+        end))
+    end,
+    off = function()
+        if CAP.hiddenprop and BOOST.orig.tech ~= nil then
+            pcall(function() sethiddenproperty(game:GetService("Lighting"), "Technology", BOOST.orig.tech) end)
+        end
+        return true
+    end,
+}
+BOOST_FX.mute = {
+    on = function()
+        return (pcall(function()
+            local gs = UserSettings():GetService("UserGameSettings")
+            BOOST.orig.vol = gs.MasterVolume
+            gs.MasterVolume = 0
+        end))
+    end,
+    off = function()
+        pcall(function()
+            if BOOST.orig.vol ~= nil then UserSettings():GetService("UserGameSettings").MasterVolume = BOOST.orig.vol end
+        end)
+        return true
+    end,
+}
+BOOST_FX.far = {
+    on = function() return true end, -- dikerjakan K.farStep di loop utama
+    off = function() K.farRestore(); return true end,
+}
+local BOOST_LABEL = { unlock = "Buka batas FPS", render3d = "Mode AFK (render 3D mati)", quality = "Kualitas grafis minimum",
+    light = "Pencahayaan Compatibility", mute = "Audio dibisukan", far = "Sembunyikan pemain jauh" }
+
+function K.boostGet(k)
+    if k == "render3d" then return BOOST.render3d == true end
+    return S.bst[k] == true
+end
+function K.boostSet(k, on, quiet)
+    local fx = BOOST_FX[k]
+    if not fx then return false end
+    if K.boostGet(k) == on then return true end
+    local ok, why = fx[on and "on" or "off"]()
+    if not ok then
+        if not quiet then toast(tostring(why or "Gagal menerapkan opsi ini di executor ini"), "warn") end
+        return false
+    end
+    if k == "render3d" then BOOST.render3d = on else S.bst[k] = on; K.saveSoon() end
+    if not quiet then log(BOOST_LABEL[k] .. (on and " aktif" or " dimatikan"), on and "ok" or "info") end
+    return true
+end
+function K.boostFlip(k) K.boostSet(k, not K.boostGet(k)) end
+
+-- sembunyikan pemain jauh: hanya tampilan (LocalTransparencyModifier), animasi dan posisi tetap jalan
+function K.farStep()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local cp, D = cam.CFrame.Position, S.bst.dist
+    for _, pl in ipairs(Players:GetPlayers()) do
+        local ch = pl ~= LP and pl.Character
+        local root = ch and ch:FindFirstChild("HumanoidRootPart")
+        if root then
+            local far = (root.Position - cp).Magnitude > D
+            local st = BOOST.far[ch]
+            if not st then st = { parts = {}, hidden = false, t = 0 }; BOOST.far[ch] = st end
+            if os.clock() - st.t > 6 then
+                st.t, st.parts = os.clock(), {}
+                for _, d in ipairs(ch:GetDescendants()) do
+                    if d:IsA("BasePart") then st.parts[#st.parts + 1] = d end
+                end
+                if st.hidden then far = true; st.hidden = false end
+            end
+            if far ~= st.hidden then
+                st.hidden = far
+                for _, part in ipairs(st.parts) do pcall(function() part.LocalTransparencyModifier = far and 1 or 0 end) end
+            end
+        end
+    end
+end
+function K.farRestore()
+    for _, st in pairs(BOOST.far) do
+        if st.hidden then
+            for _, part in ipairs(st.parts) do pcall(function() part.LocalTransparencyModifier = 0 end) end
+            st.hidden = false
+        end
+    end
+end
+
+function K.boostAll()
+    local n = 0
+    for _, k in ipairs({ "unlock", "quality", "light", "far" }) do
+        if K.boostSet(k, true, true) then n = n + 1 end
+    end
+    say(n > 0 and "ok" or "warn", "Anti-lag Plus: " .. n .. " dari 4 opsi diterapkan")
+end
+function K.boostNone()
+    for _, k in ipairs({ "unlock", "render3d", "quality", "light", "mute", "far" }) do K.boostSet(k, false, true) end
+    say("info", "Anti-lag Plus dipulihkan")
+end
+-- saat hub ditutup: kembalikan semua efek (flag tetap tersimpan kalau keep = true)
+function K.boostRestore(keep)
+    for k, fx in pairs(BOOST_FX) do
+        if K.boostGet(k) then pcall(fx.off) end
+    end
+    BOOST.render3d = false
+    if not keep then for _, k in ipairs({ "unlock", "quality", "light", "mute", "far" }) do S.bst[k] = false end end
+end
+-- opsi tersimpan diterapkan lagi saat hub dijalankan (Mode AFK tidak pernah disimpan)
+function K.boostStartup()
+    local n = 0
+    for _, k in ipairs({ "unlock", "quality", "light", "mute", "far" }) do
+        if S.bst[k] then
+            S.bst[k] = false
+            if K.boostSet(k, true, true) then n = n + 1 end
+        end
+    end
+    if n > 0 then log("Anti-lag Plus: " .. n .. " opsi tersimpan diterapkan", "ok") end
+end
+
 -- ---------- pulihkan GUI asli dan tutup ----------
 function K.restore()
     pcall(function() if GY.btn and GY.btn.Parent then GY.btn.Visible = true end end)
     pcall(function() if WR.sg and WR.sg.Parent then WR.sg.Enabled = true end end)
     pcall(function() if LG.main and LG.main.Parent then LG.main.Position = LG.origPos or UDim2.new(0, 12, 0, 80) end end)
     K.unmuteAll()
+    pcall(K.boostRestore, true)
 end
 function K.shutdownAll()
     K.allOff()
@@ -5397,6 +5592,48 @@ do
     for i, key in ipairs(LAG_TOGGLES) do
         W.toggle(c3, names[i], subs[key], function() return K.lagTgGet(key) end, function() K.lagTgFlip(key) end)
     end
+
+    -- ===== Anti-lag Plus (sisi hub) =====
+    W.heading(p, "Anti-lag plus")
+    local fs = W.grid(p, { { "avg", "Rata-rata" }, { "low", "1% low" }, { "min", "Terendah" }, { "max", "Tertinggi" } })
+    local lastS = 0
+    reg(function()
+        if os.clock() - lastS < 1 then return end
+        lastS = os.clock()
+        local st = K.fpsStats()
+        if not st then
+            for _, k in ipairs({ "avg", "low", "min", "max" }) do fs[k].Text = "--" end
+            return
+        end
+        fs.avg.Text = tostring(math.floor(st.avg + 0.5)); fs.avg.TextColor3 = col(st.avg)
+        fs.low.Text = tostring(math.floor(st.low1 + 0.5)); fs.low.TextColor3 = col(st.low1)
+        fs.min.Text = tostring(math.floor(st.min + 0.5))
+        fs.max.Text = tostring(math.floor(st.max + 0.5))
+    end)
+
+    local cp = W.card(p)
+    W.toggle(cp, "Buka batas FPS", "Batas bawaan Roblox 60 FPS. Butuh setfpscap.",
+        function() return K.boostGet("unlock") end, function() K.boostFlip("unlock") end)
+    do
+        local sc = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, cp)
+        padd(sc, 8, 0, 10, 0); vlist(sc, 6)
+        label(sc, "Batas FPS (MAX = tanpa batas)", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = nextLO() })
+        W.seg(sc, { "60", "120", "165", "240", "MAX" }, function() return S.bst.cap end,
+            function(i) S.bst.cap = i; K.saveSoon(); if S.bst.unlock then K.setCap() end end)
+    end
+    W.toggle(cp, "Mode AFK", "Matikan render 3D. Layar game hitam, GUI tetap. Aman buat AFK farming.",
+        function() return K.boostGet("render3d") end, function() K.boostFlip("render3d") end)
+    W.toggle(cp, "Kualitas grafis minimum", "Rendering Level 1 dan kualitas tersimpan",
+        function() return K.boostGet("quality") end, function() K.boostFlip("quality") end)
+    W.toggle(cp, "Pencahayaan Compatibility", "Butuh sethiddenproperty. Tampilan lebih datar, FPS jauh lebih tinggi.",
+        function() return K.boostGet("light") end, function() K.boostFlip("light") end)
+    W.toggle(cp, "Bisukan audio game", nil,
+        function() return K.boostGet("mute") end, function() K.boostFlip("mute") end)
+    W.toggle(cp, "Sembunyikan pemain jauh", "Hanya tampilan, animasi dan posisi tetap jalan",
+        function() return K.boostGet("far") end, function() K.boostFlip("far") end)
+    W.slider(cp, "Jarak sembunyi", 60, 300, 10, " stud", function() return S.bst.dist end,
+        function(v, final) S.bst.dist = v; if final then K.saveSoon() end end)
+    W.btnRow(p, { { "Terapkan Plus", "pri", K.boostAll }, { "Pulihkan Plus", "norm", K.boostNone } })
 end
 
 -- ---------- Setelan ----------
@@ -5493,7 +5730,7 @@ do
             reg(function() local ok, txt = fn(); set(txt, ok and TH.on or TH.mute) end)
         end
         diag("Executor", function() return true, EXEC:sub(1, 22) end)
-        for _, k in ipairs({ "loadstring", "firesignal", "getconnections", "getgc", "upvalues", "debuginfo", "file", "clipboard" }) do
+        for _, k in ipairs({ "loadstring", "firesignal", "getconnections", "getgc", "upvalues", "debuginfo", "file", "clipboard", "setfpscap", "hiddenprop" }) do
             diag(k, function() return CAP[k], CAP[k] and "ada" or "tidak ada" end)
         end
         for _, k in ipairs({ "gym", "war", "lag" }) do
@@ -5736,6 +5973,7 @@ if workspace.CurrentCamera then
     end))
 end
 UI.ready = true
+task.delay(1.5, function() pcall(K.boostStartup) end)
 if S.mini then K.setMini(true) else W.intro() end
 
 -- =====================================================================
@@ -5762,6 +6000,8 @@ task.spawn(function()
                 K.warInternals()
             end
         end
+        if tick % 2 == 0 and S.bst.far then pcall(K.farStep) end
+        if tick % 12 == 0 and S.bst.unlock then pcall(K.setCap) end
         for _, r in ipairs((OPEN) and REF or REFC) do runR(r) end
         if tick % 8 == 0 and DIRTY and S.autosave then K.saveNow() end
     end
