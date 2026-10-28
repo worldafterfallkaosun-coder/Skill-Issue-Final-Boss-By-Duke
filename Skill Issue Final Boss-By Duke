@@ -1,5 +1,5 @@
 --[[
-  SKILL ISSUE FINAL BOSS v1.3  |  By Duke
+  SKILL ISSUE FINAL BOSS v1.4  |  By Duke
 
   Satu hub untuk tiga sistem:
     1. Gym bot       (auto gym, High School Anime)
@@ -25,7 +25,7 @@
 local SRC = {}
 SRC.gym = [=====[
 -- ============================================================
---  GYM AUTO v2 — High School Anime | Delta / Roblox (Luau)
+--  GYM AUTO v2 â€” High School Anime | Delta / Roblox (Luau)
 --
 --  Latihan yang di-handle:
 --   * Angkat beban : skill check ring (Space / TAP), baca jarum
@@ -413,105 +413,105 @@ notify(string.format("Aktif | Level %d | AutoHit %s | Fast %s",
 ]=====]
 SRC.war = [=====[
 -- ============================================================
---  HIGH SCHOOL ANIME — Combat Tools v13.4 WRAITH (attack-tagged guard log)
+--  HIGH SCHOOL ANIME â€” Combat Tools v13.4 WRAITH (attack-tagged guard log)
 --
 --  v13.4 (patch di atas v13.3):
---  · GUARD LOG sekarang nyebut SERANGAN di balik tiap drop guard:
+--  Â· GUARD LOG sekarang nyebut SERANGAN di balik tiap drop guard:
 --      [GUARD] 0.93 -> 0.49 (-0.44) parry | hold=true sends=3 prev=11 win=2 | atk=NamaAnim|H|pred|0.31s
 --    atk = nama animasi | H (heavy) atau L (light) | pred (timing udah
 --    dipelajari) atau unk | umur request (detik sebelum guard turun).
 --    kind = "parry" kalau ParryFX-mu nyala <=0.15s dari drop, selain itu "other"
 --    (kena hit / block biasa).
---  · JENDELA GAK NUMPUK: request yang sama (hit sama / animasi sama yang
+--  Â· JENDELA GAK NUMPUK: request yang sama (hit sama / animasi sama yang
 --    overlap) digabung jadi satu jendela, bukan nambah entri baru tiap
 --    heartbeat (win sebelumnya bisa sampai 11).
 --
---  HIGH SCHOOL ANIME — Combat Tools v13.3 WRAITH (single-press on learned timing)
+--  HIGH SCHOOL ANIME â€” Combat Tools v13.3 WRAITH (single-press on learned timing)
 --
 --  v13.3 (patch di atas v13.2):
---  · Jendela dengan timing yang SUDAH dipelajari sekarang pencet block
+--  Â· Jendela dengan timing yang SUDAH dipelajari sekarang pencet block
 --    SEKALI di waktu yang pas lalu ditahan (CFG.PredRefresh = 0), persis
 --    kayak parry manual. Refresh di sini gak ada gunanya: kiriman yang
 --    nyampe server sesudah hit bisa nge-arm ulang timestamp parry dan
 --    (dugaan) bikin guard kepotong 2x (50 vs 26 manual).
---  · Refresh (CFG.RefreshMax) cuma buat animasi yang belum dipelajari.
+--  Â· Refresh (CFG.RefreshMax) cuma buat animasi yang belum dipelajari.
 --
---  HIGH SCHOOL ANIME — Combat Tools v13.2 WRAITH (hold + eco + guard-aware)
+--  HIGH SCHOOL ANIME â€” Combat Tools v13.2 WRAITH (hold + eco + guard-aware)
 --
 --  v13.2 (patch di atas v13.1):
---  · REFRESH DIBATASI: tiap jendela hit cuma boleh kirim block
+--  Â· REFRESH DIBATASI: tiap jendela hit cuma boleh kirim block
 --    1x (pencet) + CFG.RefreshMax refresh (default 2), bukan terus-
 --    terusan. Tujuannya nurunin biaya guard per parry (parry manual
 --    = ~26 poin guard, v13 lewat script = ~50).
---  · EcoGuardLow 0.25 -> 0.35 (satu parry ~0.26, jadi 0.25 terlalu mepet).
---  · GUARD LOG: tiap GuardValue turun, console nge-print berapa turunnya
+--  Â· EcoGuardLow 0.25 -> 0.35 (satu parry ~0.26, jadi 0.25 terlalu mepet).
+--  Â· GUARD LOG: tiap GuardValue turun, console nge-print berapa turunnya
 --    plus status hold (CFG.GuardLog = false buat mematikan). Pakai ini
 --    buat nentuin RefreshMax / HoldRefresh yang pas.
 --
---  HIGH SCHOOL ANIME — Combat Tools v13.1 WRAITH (hold + eco build)
+--  HIGH SCHOOL ANIME â€” Combat Tools v13.1 WRAITH (hold + eco build)
 --
 --  v13.1 (patch di atas v13.0):
---  · MODE HEMAT GUARD: hold default lebih pendek (HoldTail 0.08,
+--  Â· MODE HEMAT GUARD: hold default lebih pendek (HoldTail 0.08,
 --    HoldUnknown 0.30, HoldHeavy 0.45) dan hold buat animasi yang
 --    BELUM dipelajari dilewati / diputus kalau GuardValue < 0.25
 --    (CFG.EcoSkipLow / EcoGuardLow). Animasi yang udah dipelajari
 --    dan ragdoll tetap jalan.
---  · LOCK LEBIH LAMA: EXCHANGE_TTL 1.4s -> 8s (lock bertahan ~8,3s
+--  Â· LOCK LEBIH LAMA: EXCHANGE_TTL 1.4s -> 8s (lock bertahan ~8,3s
 --    setelah baku hantam terakhir; tetap lepas kalau target invalid
 --    atau lewat Leash).
 --
---  HIGH SCHOOL ANIME — Combat Tools v13.0 WRAITH (hold build)
+--  HIGH SCHOOL ANIME â€” Combat Tools v13.0 WRAITH (hold build)
 --
 --  v13.0 HOLD (patch di atas v12.0):
---  · HOLD MANAGER: tap lepas-pencet diganti satu block yang DITAHAN
+--  Â· HOLD MANAGER: tap lepas-pencet diganti satu block yang DITAHAN
 --    sepanjang jendela hit. Di CombatConfig.BlockState, Set(false)
 --    ngapus timestamp parry (v_u_93[p]=nil) dan ConsumeParry() cuma
 --    lolos kalau block mulai <= window detik sebelum hit. Tap yang
 --    dilepas sebelum hit mendarat = celah = parry hilang = kena.
---  · RefreshMode: "true" (kirim true berulang) atau "cycle"
+--  Â· RefreshMode: "true" (kirim true berulang) atau "cycle"
 --    (false+true di frame yang sama). Ganti kalau salah satu jelek.
---  · Overlap: banyak penyerang / combo gak saling ngunci lagi
+--  Â· Overlap: banyak penyerang / combo gak saling ngunci lagi
 --    (spamLock dibuang, jendela digabung).
---  · FIX ParryFX: event ini di-broadcast ke semua pemain. Dulu parry
+--  Â· FIX ParryFX: event ini di-broadcast ke semua pemain. Dulu parry
 --    pemain lain dihitung sebagai sukses kamu dan ngotorin belajar
 --    lead + hit-delay. Sekarang cuma yang parrier == karaktermu.
---  · Delay reaksi acak (ReactDelay) dibuang buat jalur non-prediksi.
---  · Jeda minimal antar request 0.30s -> CFG.RefireGap (0.05s).
+--  Â· Delay reaksi acak (ReactDelay) dibuang buat jalur non-prediksi.
+--  Â· Jeda minimal antar request 0.30s -> CFG.RefireGap (0.05s).
 --
---  HIGH SCHOOL ANIME — Combat Tools v12.0 WRAITH (accuracy build)
+--  HIGH SCHOOL ANIME â€” Combat Tools v12.0 WRAITH (accuracy build)
 --  (v11.0 by Nono, merged patches v11.1 + v11.2)
 --
 --  v12.0 ACCURACY:
---  · ADAPTIVE LEAD: bot nyoba beberapa lead (berapa ms sebelum hit
+--  Â· ADAPTIVE LEAD: bot nyoba beberapa lead (berapa ms sebelum hit
 --    tap pertama dikirim) dan belajar sendiri mana yang bikin parry
 --    sukses (ParryFX) vs kena damage. Gak perlu tau parry window game.
---  · Hit-delay disimpen ke file (writefile) -> gak mulai dari nol
+--  Â· Hit-delay disimpen ke file (writefile) -> gak mulai dari nol
 --    tiap rejoin. Prediksi aktif dari sampel pertama (CFG.MinSamples).
---  · Key animasi = Name + AnimationId (gak bentrok kalau nama sama).
---  · Belajar juga dari pemain lain yang lagi berantem di sekitar.
---  · Parry tetap jalan pas kamu lagi mukul (CFG.ParryWhileSwinging).
---  · Burst terprediksi lebih rapat (CFG.PredTaps), rate limiter floor naik.
---  · WRAITH_DUMP() di console: statistik lead + hit-delay ke clipboard.
+--  Â· Key animasi = Name + AnimationId (gak bentrok kalau nama sama).
+--  Â· Belajar juga dari pemain lain yang lagi berantem di sekitar.
+--  Â· Parry tetap jalan pas kamu lagi mukul (CFG.ParryWhileSwinging).
+--  Â· Burst terprediksi lebih rapat (CFG.PredTaps), rate limiter floor naik.
+--  Â· WRAITH_DUMP() di console: statistik lead + hit-delay ke clipboard.
 --
 --  v11.2 LOCK (strict, hit-only):
---  · Lock triggers ONLY from two events, nothing else:
+--  Â· Lock triggers ONLY from two events, nothing else:
 --      HIT-IN  = my HP dropped AND a real attacker is identified
 --                (attacked <0.85s ago, in range, facing me)
 --      HIT-OUT = enemy HP dropped within my swing window,
 --                in range and in front of me
---  · NO fallback to "nearest player" anywhere
---  · FX remotes (ReactionFX/HitRun/KickCombo/CounterHit/HeavyPunch)
+--  Â· NO fallback to "nearest player" anywhere
+--  Â· FX remotes (ReactionFX/HitRun/KickCombo/CounterHit/HeavyPunch)
 --    no longer lock. They only record attack evidence.
---  · Jumping / falling / ragdoll no longer lock
+--  Â· Jumping / falling / ragdoll no longer lock
 --
 --  v11.2 PARRY:
---  · Evidence-gated: only parries when a nearby player is actually
+--  Â· Evidence-gated: only parries when a nearby player is actually
 --    attacking (anim w/ Action priority, attack attr, atk event)
---  · Adaptive hit-timing: learns per-animation hit delay from your
+--  Â· Adaptive hit-timing: learns per-animation hit delay from your
 --    own hits-taken + successful parries, then times the tap cluster
 --    to land right before the hit (after 2 samples per animation)
---  · Reaction/hit-react animations ignored (no parry on "gethit")
---  · Removed velocity pre-fire scan (main source of false parries)
+--  Â· Reaction/hit-react animations ignored (no parry on "gethit")
+--  Â· Removed velocity pre-fire scan (main source of false parries)
 -- ============================================================
 
 local Players     = game:GetService("Players")
@@ -597,7 +597,7 @@ local function MaybeRotate()
 end
 
 -- ============================================================
---  FPS — rolling 60-sample mean
+--  FPS â€” rolling 60-sample mean
 -- ============================================================
 local FPS = { v = 60, ft = 1/60, buf = {}, n = 0, cap = 60, last = 0 }
 RunService.Heartbeat:Connect(function(dt)
@@ -613,7 +613,7 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 -- ============================================================
---  PING — rolling 24-sample, EMA, variance
+--  PING â€” rolling 24-sample, EMA, variance
 -- ============================================================
 local Ping = { v=80, jit=0, ema=80, buf={}, n=0, cap=24, last=0 }
 local function _pingUpdate()
@@ -637,7 +637,7 @@ local function GetPing()   _pingUpdate(); return Ping.v   end
 local function GetJitter() _pingUpdate(); return Ping.jit  end
 
 -- ============================================================
---  CORE TIMING — everything derived from live FPS + Ping
+--  CORE TIMING â€” everything derived from live FPS + Ping
 -- ============================================================
 local function PingLead()
     local p = GetPing(); local j = GetJitter()
@@ -734,7 +734,7 @@ local function gamma(k, th)
 end
 
 -- ============================================================
---  ADAPTIVE LEAD — Thompson sampling over CFG.LeadSet
+--  ADAPTIVE LEAD â€” Thompson sampling over CFG.LeadSet
 --  Tiap burst terprediksi milih satu lead. Hasilnya (parry sukses /
 --  kena damage) dilaporin balik, jadi lead yang paling sering sukses
 --  makin sering dipilih. Statistik diluruhkan pelan biar tetep adaptif.
@@ -768,7 +768,7 @@ function Lead:report(i, ok)
 end
 
 -- ============================================================
---  RATE LIMITER — floor/ceil dari CFG, probe every 14s
+--  RATE LIMITER â€” floor/ceil dari CFG, probe every 14s
 -- ============================================================
 local DynRL = { floor=CFG.RateFloor, ceil=CFG.RateCeil, cur=CFG.RateStart, probeT=0, pCd=14, hit=false, hb=false }
 function DynRL:probe()
@@ -850,7 +850,7 @@ local function LearnDelay(name, obs)
 end
 
 -- ============================================================
---  PERSISTENCE — hit-delay + statistik lead disimpen ke file
+--  PERSISTENCE â€” hit-delay + statistik lead disimpen ke file
 -- ============================================================
 local _saveT = 0
 local function HDLoad()
@@ -923,7 +923,7 @@ end
 Players.PlayerRemoving:Connect(function(p) PS[p.UserId]=nil end)
 
 -- ============================================================
---  RAGDOLL — property signal + 55ms poll fallback
+--  RAGDOLL â€” property signal + 55ms poll fallback
 -- ============================================================
 local RDL = {on=false, t=0}
 local function SetRDL(v)
@@ -940,7 +940,7 @@ local function PollRDL()
 end
 
 -- ============================================================
---  FIRE QUEUE — priority sorted
+--  FIRE QUEUE â€” priority sorted
 -- ============================================================
 local FQ = {q={}, last=0, gap=0.016}
 local PRI = {prearm=6, ragdoll=5, instant=4, reactive=3, combo=3, normal=2, idle=1}
@@ -975,7 +975,7 @@ local Parry = {
 }
 
 -- ============================================================
---  OUTCOME TRACKING — feeds the adaptive lead
+--  OUTCOME TRACKING â€” feeds the adaptive lead
 --  Pending = burst terprediksi yang nunggu hasil (ParryFX / HP drop)
 -- ============================================================
 local Pend, Stat, _lastFailT = {}, {ok=0, fail=0}, 0
@@ -1027,7 +1027,7 @@ local LCFG = {
 }
 
 -- ============================================================
---  LOCK STATE — TRUE NEUTRAL
+--  LOCK STATE â€” TRUE NEUTRAL
 --  Lock.target is ONLY set inside LockOn().
 --  LockOn() ONLY runs from CL:onIncoming / CL:onOutgoing,
 --  which are ONLY called with a verified player after a real
@@ -1053,7 +1053,7 @@ local CL = {active=false, lastT=0, count=0}
 local LockOn, UnlockTarget, FullOff, GetBest
 
 -- ============================================================
---  COMBAT LOCK METHODS — need a VERIFIED player, else nothing
+--  COMBAT LOCK METHODS â€” need a VERIFIED player, else nothing
 -- ============================================================
 function CL:onIncoming(t)
     if not t then return end
@@ -1118,7 +1118,7 @@ end
 local function MarkCombat() Lock.combatT=os.clock(); Lock.inCombat=true end
 
 -- ============================================================
---  FIND ATTACKER — STRICT. Returns nil if nobody was really attacking.
+--  FIND ATTACKER â€” STRICT. Returns nil if nobody was really attacking.
 --  Needs: attack evidence within window, in HitRange, facing me.
 --  NO nearest-player fallback.
 -- ============================================================
@@ -1190,7 +1190,7 @@ local function HasEvidence(p, ps, now)
 end
 
 -- ============================================================
---  SCORE — 2ms cache
+--  SCORE â€” 2ms cache
 -- ============================================================
 local function Score(p, ps)
     local now=os.clock()
@@ -1401,7 +1401,7 @@ local function HoldParried()
 end
 
 -- ============================================================
---  ATTACK TAG (v13.4) — catatan request parry terakhir buat guard log
+--  ATTACK TAG (v13.4) â€” catatan request parry terakhir buat guard log
 -- ============================================================
 local function HoldNote(name, heavy, urg, pred)
     local h = Hold.hist
@@ -1427,7 +1427,7 @@ local function AtkTag()
 end
 
 -- ============================================================
---  GUARD LOG (v13.2) — print tiap GuardValue turun
+--  GUARD LOG (v13.2) â€” print tiap GuardValue turun
 -- ============================================================
 local function GuardLogHook(char)
     if not CFG.GuardLog or not char then return end
@@ -1458,7 +1458,7 @@ local spamLock=false; local spamLockT=0
 local function ClearSL() spamLock=false; spamLockT=0 end
 
 -- ============================================================
---  DO BURST (v13) — jadwalin jendela hold
+--  DO BURST (v13) â€” jadwalin jendela hold
 --  Prediksi ada (hit-delay udah dipelajari):
 --      mulai  = animStart + hitDelay - RTT - lead(Thompson)
 --      selesai = animStart + hitDelay + HoldTail
@@ -1592,7 +1592,7 @@ local function TryPreArm(ps, uid, animName, heavy, t0)
 end
 
 -- ============================================================
---  HEARTBEAT — parry scan (never touches the lock)
+--  HEARTBEAT â€” parry scan (never touches the lock)
 --  v11.2: only players with attack evidence are considered
 -- ============================================================
 local _hbT=0
@@ -1635,7 +1635,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ============================================================
---  WATCH CHAR — anim + attr listeners
+--  WATCH CHAR â€” anim + attr listeners
 -- ============================================================
 local function WatchChar(p, char)
     if not char then return end
@@ -1942,7 +1942,7 @@ LockOn = function(t)
 end
 
 -- ============================================================
---  LOCK HEARTBEAT — aim + expiry only
+--  LOCK HEARTBEAT â€” aim + expiry only
 -- ============================================================
 RunService.Heartbeat:Connect(function(dt)
     if os.clock()-Lock.combatT>5.0 then Lock.inCombat=false end
@@ -2061,7 +2061,7 @@ LP.CharacterAdded:Connect(function()
 end)
 
 -- ============================================================
---  UI — MINIMAL
+--  UI â€” MINIMAL
 -- ============================================================
 local old=PGui:FindFirstChild("WRAITH_UI"); if old then old:Destroy() end
 
@@ -2074,7 +2074,7 @@ local Pill=Instance.new("TextButton")
 Pill.Size=UDim2.new(0,38,0,24); Pill.Position=UDim2.new(0,12,0.5,-12)
 Pill.BackgroundColor3=Color3.fromRGB(14,14,14); Pill.BackgroundTransparency=0.06
 Pill.TextColor3=Color3.fromRGB(140,140,140); Pill.TextSize=13
-Pill.Font=Enum.Font.GothamBold; Pill.Text="◈"
+Pill.Font=Enum.Font.GothamBold; Pill.Text="â—ˆ"
 Pill.BorderSizePixel=0; Pill.ZIndex=10; Pill.Active=true; Pill.Parent=SG
 Instance.new("UICorner",Pill).CornerRadius=UDim.new(1,0)
 local PS2=Instance.new("UIStroke",Pill); PS2.Thickness=1; PS2.Color=Color3.fromRGB(45,45,45)
@@ -2125,7 +2125,7 @@ SL.Size=UDim2.new(1,-12,0,10); SL.Position=UDim2.new(0,6,0,90)
 SL.BackgroundTransparency=1; SL.TextColor3=Color3.fromRGB(40,40,40)
 SL.TextSize=8; SL.Font=Enum.Font.Gotham
 SL.TextXAlignment=Enum.TextXAlignment.Left
-SL.Text="idle · neutral"; SL.Parent=Panel
+SL.Text="idle Â· neutral"; SL.Parent=Panel
 
 local panelOpen=false
 local function OpenP()
@@ -2164,7 +2164,7 @@ local function UpdUI()
 
     if Parry.on then
         PC.BackgroundColor3=rdl and Color3.fromRGB(120,16,78) or Color3.fromRGB(16,110,42)
-        PC.Text=rdl and "PARRY  ⚡RDL" or "PARRY  ON"
+        PC.Text=rdl and "PARRY  âš¡RDL" or "PARRY  ON"
         PC.TextColor3=rdl and Color3.fromRGB(255,140,210) or Color3.fromRGB(120,255,140)
     else
         PC.BackgroundColor3=Color3.fromRGB(22,22,22); PC.Text="PARRY  OFF"; PC.TextColor3=Color3.fromRGB(140,140,140)
@@ -2175,7 +2175,7 @@ local function UpdUI()
     elseif not Lock.target then
         LC.BackgroundColor3=Color3.fromRGB(20,20,50); LC.Text="LOCK  NEUTRAL"; LC.TextColor3=Color3.fromRGB(80,100,165)
     elseif Lock.inCombat then
-        LC.BackgroundColor3=Color3.fromRGB(140,26,26); LC.Text="LOCK  ⚔COMBAT"; LC.TextColor3=Color3.fromRGB(255,130,130)
+        LC.BackgroundColor3=Color3.fromRGB(140,26,26); LC.Text="LOCK  âš”COMBAT"; LC.TextColor3=Color3.fromRGB(255,130,130)
     else
         LC.BackgroundColor3=Color3.fromRGB(14,68,152); LC.Text="LOCK  ACTIVE"; LC.TextColor3=Color3.fromRGB(120,185,255)
     end
@@ -2189,9 +2189,9 @@ local function UpdUI()
         local left=math.max(0,math.floor((CL.lastT+EXCHANGE_TTL-os.clock())*10)/10)
         SL.TextColor3=Color3.fromRGB(60,105,60)
         local tName=Lock.target and Lock.target.Name or "?"
-        SL.Text=string.format("exchange %.1fs · %s", left, tName)
+        SL.Text=string.format("exchange %.1fs Â· %s", left, tName)
     else
-        SL.TextColor3=Color3.fromRGB(40,40,40); SL.Text="idle · neutral"
+        SL.TextColor3=Color3.fromRGB(40,40,40); SL.Text="idle Â· neutral"
     end
 
     PStr.Color=Parry.on and Lock.on and Color3.fromRGB(0,190,135)
@@ -2707,10 +2707,10 @@ local function infoRow(name, val, color)
     })
 end
 
-local statusVal = infoRow("STATUS", "● READY", GREEN)
+local statusVal = infoRow("STATUS", "â— READY", GREEN)
 
 local applyBtn = new("TextButton", {
-    Text = "⚡ APPLY NUKE", Font = Enum.Font.Code, TextSize = 10,
+    Text = "âš¡ APPLY NUKE", Font = Enum.Font.Code, TextSize = 10,
     TextColor3 = Color3.new(0, 0, 0), BackgroundColor3 = Color3.fromRGB(0, 220, 110),
     Size = UDim2.new(1, 0, 0, 28), BorderSizePixel = 0, LayoutOrder = nextOrd(),
 }, body)
@@ -2739,8 +2739,8 @@ local function smallBtn(parent, txt, color, n, onClick)
 end
 
 local actionRow = btnRow()
-smallBtn(actionRow, "↺ RESTORE", Color3.fromRGB(200, 200, 200), 2, function() restoreAll() end)
-smallBtn(actionRow, "✕ UNLOAD", Color3.fromRGB(220, 90, 80), 2, function() unload() end)
+smallBtn(actionRow, "â†º RESTORE", Color3.fromRGB(200, 200, 200), 2, function() restoreAll() end)
+smallBtn(actionRow, "âœ• UNLOAD", Color3.fromRGB(220, 90, 80), 2, function() unload() end)
 
 local logBox = new("TextLabel", {
     Text = "ready.", Font = Enum.Font.Code, TextSize = 8, TextColor3 = Color3.fromRGB(80, 80, 80),
@@ -2990,7 +2990,7 @@ local function adaptiveStep()
         if tier < 2 then
             tier += 1
             log("adaptive T" .. tier .. ": dist " .. math.floor(userDist * TIER_DIST[tier + 1]))
-            setStatus("● ADAPTIVE T" .. tier, AMBER)
+            setStatus("â— ADAPTIVE T" .. tier, AMBER)
         end
     elseif currentFPS >= good and tier > 0 then
         okStreak += 1
@@ -2998,7 +2998,7 @@ local function adaptiveStep()
             okStreak = 0
             tier -= 1
             log("adaptive T" .. tier .. ": pulih")
-            setStatus(tier > 0 and "● ADAPTIVE T" .. tier or "● ACTIVE", tier > 0 and AMBER or GREEN)
+            setStatus(tier > 0 and "â— ADAPTIVE T" .. tier or "â— ACTIVE", tier > 0 and AMBER or GREEN)
         end
     else
         okStreak = 0
@@ -3030,16 +3030,16 @@ local function applyGlobals()
 end
 
 local function setApplyIdle()
-    applyBtn.Text = "⚡ APPLY NUKE"
+    applyBtn.Text = "âš¡ APPLY NUKE"
     applyBtn.BackgroundColor3 = Color3.fromRGB(0, 220, 110)
     applyBtn.TextColor3 = Color3.new(0, 0, 0)
 end
 
 local function onNukeDone()
     nukeActive = false
-    log(nukeTotal .. " obj | " .. culledN .. " hidden ✓")
-    setStatus(tier > 0 and "● ADAPTIVE T" .. tier or "● ACTIVE", tier > 0 and AMBER or GREEN)
-    applyBtn.Text = "⚡ RE-APPLY"
+    log(nukeTotal .. " obj | " .. culledN .. " hidden âœ“")
+    setStatus(tier > 0 and "â— ADAPTIVE T" .. tier or "â— ACTIVE", tier > 0 and AMBER or GREEN)
+    applyBtn.Text = "âš¡ RE-APPLY"
     applyBtn.BackgroundColor3 = Color3.fromRGB(0, 220, 110)
     applyBtn.TextColor3 = Color3.new(0, 0, 0)
 end
@@ -3051,11 +3051,11 @@ applyNuke = function()
         fpsBeforeVal.TextColor3 = colorFPS(currentFPS)
     end
     applied, nukeActive = true, true
-    setStatus("● RUNNING", AMBER)
+    setStatus("â— RUNNING", AMBER)
     applyBtn.Text = "..."
     applyBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     applyBtn.TextColor3 = Color3.fromRGB(0, 220, 110)
-    log("fps cap " .. fpsCapValue .. (tryFPSCap(fpsCapValue) and " ✓" or " (no executor)"))
+    log("fps cap " .. fpsCapValue .. (tryFPSCap(fpsCapValue) and " âœ“" or " (no executor)"))
     applyGlobals()
     local list = workspace:GetDescendants()
     table.move(list, 1, #list, qt + 1, queue)
@@ -3097,13 +3097,13 @@ end
 restoreAll = function()
     if busy then return end
     busy = true
-    setStatus("● RESTORING", AMBER)
+    setStatus("â— RESTORING", AMBER)
     task.spawn(function()
         runRestore(false)
         setApplyIdle()
         fpsAfterVal.Text = "-- fps"
         fpsAfterVal.TextColor3 = DIM
-        setStatus("● READY", GREEN)
+        setStatus("â— READY", GREEN)
         log("restored")
         busy = false
     end)
@@ -3229,7 +3229,7 @@ print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", 
 -- =====================================================================
 --  DASAR
 -- =====================================================================
-local VERSION = "1.3"
+local VERSION = "1.4"
 
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
@@ -3270,6 +3270,7 @@ local CAP = {
     file           = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function",
     clipboard      = type(setclipboard) == "function",
     setfpscap      = type(setfpscap) == "function",
+    fflag          = type(setfflag) == "function",
     hiddenprop     = type(sethiddenproperty) == "function" and type(gethiddenproperty) == "function",
 }
 local EXEC = "tidak diketahui"
@@ -3345,7 +3346,8 @@ local S = {
     mini = false, fx = true, intro = true,
     hk = { hub = "RightAlt", gym = "F1", parry = "F2", lock = "F3", lag = "F4" },
     wp = nil, fp = nil, mp = nil,
-    bst = { cap = 2, unlock = false, quality = false, light = false, mute = false, far = false, dist = 120 },
+    bst = { cap = 2, unlock = false, quality = false, light = false, mute = false, far = false, sweep = false, dist = 120 },
+    ab = { mode = 0, target = 60 },
     gym = {}, war = {}, slots = { gym = {}, war = {} },
 }
 local DIRTY = false
@@ -3385,11 +3387,15 @@ local function loadSettings()
         end
     end
     if type(d.bst) == "table" then
-        for _, k in ipairs({ "unlock", "quality", "light", "mute", "far" }) do
+        for _, k in ipairs({ "unlock", "quality", "light", "mute", "far", "sweep" }) do
             if type(d.bst[k]) == "boolean" then S.bst[k] = d.bst[k] end
         end
         if type(d.bst.cap) == "number" then S.bst.cap = math.clamp(math.floor(d.bst.cap), 1, 5) end
         if type(d.bst.dist) == "number" then S.bst.dist = math.clamp(d.bst.dist, 60, 300) end
+    end
+    if type(d.ab) == "table" then
+        if type(d.ab.mode) == "number" then S.ab.mode = math.clamp(math.floor(d.ab.mode), 0, 2) end
+        if type(d.ab.target) == "number" then S.ab.target = math.clamp(d.ab.target, 30, 240) end
     end
 end
 loadSettings()
@@ -3735,7 +3741,7 @@ function K.reattach(key)
     if key == "gym" then GY = {}; CFGT.gym = nil; CFGT.game = nil; APPLIED.gym = nil; FAST.on = false; FAST.tried = false
     elseif key == "war" then WR = {}; CFGT.war = nil; WI = {}; APPLIED.war = nil
     else LG = { sl = {}, tg = {} } end
-    log(m.label .. ": menghubungkan ulang…", "warn")
+    log(m.label .. ": menghubungkan ulangâ€¦", "warn")
 end
 
 function K.revive(key)
@@ -4025,7 +4031,7 @@ function K.ready(m)
 end
 function K.modNote(m)
     if m.state == "ready" then return "" end
-    if m.state == "loading" then return "Memuat modul…" end
+    if m.state == "loading" then return "Memuat modulâ€¦" end
     if m.state == "gone" then return "Anti-lag dilepas. Hubungkan ulang untuk memuat lagi." end
     return m.err or m.note
 end
@@ -4053,7 +4059,7 @@ function K.lagApply()
     if not K.ready(m) then return end
     if V.lag.running then return end
     K.fireSig(LG.apply, "MouseButton1Click")
-    log("Anti-lag memproses objek…")
+    log("Anti-lag memproses objekâ€¦")
 end
 function K.lagRestore()
     if MOD.lag.state ~= "ready" then return end
@@ -4275,19 +4281,61 @@ function K.fpsStats()
     local lowN = math.max(1, math.floor(c * 0.01))
     local ls = 0
     for i = c - lowN + 1, c do ls = ls + arr[i] end
-    return { avg = c / sum, min = 1 / math.max(arr[c], 1e-4), max = 1 / math.max(arr[1], 1e-4), low1 = lowN / math.max(ls, 1e-4) }
+    local k10 = math.max(1, math.ceil(c * 0.1))
+    return { avg = c / sum, min = 1 / math.max(arr[c], 1e-4), max = 1 / math.max(arr[1], 1e-4), low1 = lowN / math.max(ls, 1e-4), hi = 1 / math.max(arr[k10], 1e-4) }
 end
 
+-- buka batas FPS lewat semua jalur yang mungkin; hasil tiap jalur dicatat buat diagnostik
 function K.setCap()
-    if not CAP.setfpscap then return false end
-    return (pcall(setfpscap, CAPS[S.bst.cap] or 120))
+    local v = CAPS[S.bst.cap] or 120
+    local val = (v == 0) and 9999 or v
+    local res = { setfpscap = false, fflag = false, usersettings = false }
+    if CAP.setfpscap then res.setfpscap = (pcall(setfpscap, val)) end
+    if CAP.fflag then
+        res.fflag = (pcall(setfflag, "DFIntTaskSchedulerTargetFps", tostring(val)))
+        pcall(setfflag, "FFlagTaskSchedulerLimitTargetFpsTo2402", "False")
+    end
+    res.usersettings = (pcall(function() UserSettings():GetService("UserGameSettings").FramerateCap = val end))
+    pcall(function() settings().Rendering.FrameRateManager = Enum.FramerateManagerMode.Off end)
+    BOOST.capRes = res
+    return res.setfpscap or res.fflag or res.usersettings
+end
+function K.capReset() BOOST.capSince, BOOST.capWarned, BOOST.capNote = os.clock(), false, nil end
+function K.capText()
+    local r = BOOST.capRes
+    if not r then return "belum dipakai" end
+    local t = {}
+    if r.setfpscap then t[#t + 1] = "setfpscap" end
+    if r.fflag then t[#t + 1] = "fflag" end
+    if r.usersettings then t[#t + 1] = "setelan" end
+    return #t > 0 and table.concat(t, "+") or "tidak ada"
+end
+function K.capNote() return BOOST.capNote end
+-- cek apakah FPS benar-benar melewati 60 setelah cap dibuka
+function K.capWatch()
+    if not S.bst.unlock then BOOST.capSince, BOOST.capNote = nil, nil; return end
+    local target = CAPS[S.bst.cap] or 120
+    if target ~= 0 and target <= 60 then BOOST.capNote = "Target 60"; return end
+    BOOST.capSince = BOOST.capSince or os.clock()
+    local st = K.fpsStats()
+    if not st or os.clock() - BOOST.capSince < 8 then return end
+    if st.hi <= 64 then
+        BOOST.capNote = "Tertahan ~60"
+        if not BOOST.capWarned then
+            BOOST.capWarned = true
+            toast("FPS masih tertahan 60. Kemungkinan dibatasi perangkat atau Roblox, lihat Diagnostik.", "warn")
+        end
+    else
+        BOOST.capNote = "Terbuka ~" .. math.floor(st.hi)
+    end
 end
 
 local BOOST_FX = {}
 BOOST_FX.unlock = {
     on = function()
-        if not CAP.setfpscap then return false, "Executor tanpa setfpscap" end
-        return K.setCap()
+        K.capReset()
+        if K.setCap() then return true end
+        return false, "Tidak ada jalur cap FPS yang bisa dipakai di executor ini"
     end,
     off = function() if CAP.setfpscap then pcall(setfpscap, 60) end return true end,
 }
@@ -4351,7 +4399,7 @@ BOOST_FX.far = {
     off = function() K.farRestore(); return true end,
 }
 local BOOST_LABEL = { unlock = "Buka batas FPS", render3d = "Mode AFK (render 3D mati)", quality = "Kualitas grafis minimum",
-    light = "Pencahayaan Compatibility", mute = "Audio dibisukan", far = "Sembunyikan pemain jauh" }
+    light = "Pencahayaan Compatibility", mute = "Audio dibisukan", far = "Sembunyikan pemain jauh", sweep = "Sapu visual lanjutan" }
 
 function K.boostGet(k)
     if k == "render3d" then return BOOST.render3d == true end
@@ -4409,13 +4457,13 @@ end
 
 function K.boostAll()
     local n = 0
-    for _, k in ipairs({ "unlock", "quality", "light", "far" }) do
+    for _, k in ipairs({ "unlock", "quality", "light", "far", "sweep" }) do
         if K.boostSet(k, true, true) then n = n + 1 end
     end
-    say(n > 0 and "ok" or "warn", "Anti-lag Plus: " .. n .. " dari 4 opsi diterapkan")
+    say(n > 0 and "ok" or "warn", "Anti-lag Plus: " .. n .. " dari 5 opsi diterapkan")
 end
 function K.boostNone()
-    for _, k in ipairs({ "unlock", "render3d", "quality", "light", "mute", "far" }) do K.boostSet(k, false, true) end
+    for _, k in ipairs({ "unlock", "render3d", "quality", "light", "mute", "far", "sweep" }) do K.boostSet(k, false, true) end
     say("info", "Anti-lag Plus dipulihkan")
 end
 -- saat hub ditutup: kembalikan semua efek (flag tetap tersimpan kalau keep = true)
@@ -4424,18 +4472,157 @@ function K.boostRestore(keep)
         if K.boostGet(k) then pcall(fx.off) end
     end
     BOOST.render3d = false
-    if not keep then for _, k in ipairs({ "unlock", "quality", "light", "mute", "far" }) do S.bst[k] = false end end
+    if not keep then for _, k in ipairs({ "unlock", "quality", "light", "mute", "far", "sweep" }) do S.bst[k] = false end end
 end
 -- opsi tersimpan diterapkan lagi saat hub dijalankan (Mode AFK tidak pernah disimpan)
 function K.boostStartup()
     local n = 0
-    for _, k in ipairs({ "unlock", "quality", "light", "mute", "far" }) do
+    for _, k in ipairs({ "unlock", "quality", "light", "mute", "far", "sweep" }) do
         if S.bst[k] then
             S.bst[k] = false
             if K.boostSet(k, true, true) then n = n + 1 end
         end
     end
     if n > 0 then log("Anti-lag Plus: " .. n .. " opsi tersimpan diterapkan", "ok") end
+end
+
+-- ---------- sapu visual lanjutan (di luar jangkauan Nono) ----------
+local SW = { orig = setmetatable({}, { __mode = "k" }), running = false, conn = nil }
+local function swSet(obj, prop, val)
+    local o = SW.orig[obj]
+    if not o then o = {}; SW.orig[obj] = o end
+    if o[prop] == nil then
+        local ok, cur = pcall(function() return obj[prop] end)
+        if not ok then return end
+        o[prop] = cur
+    end
+    pcall(function() obj[prop] = val end)
+end
+local function swProcess(obj)
+    local cls = obj.ClassName
+    if cls == "Highlight" or cls == "Clouds" then swSet(obj, "Enabled", false); return end
+    local mine = LP.Character
+    if mine and obj:IsDescendantOf(mine) then return end
+    if cls == "Humanoid" then swSet(obj, "DisplayDistanceType", Enum.HumanoidDisplayDistanceType.None)
+    elseif cls == "Shirt" then swSet(obj, "ShirtTemplate", "")
+    elseif cls == "Pants" then swSet(obj, "PantsTemplate", "")
+    elseif cls == "ShirtGraphic" then swSet(obj, "Graphic", "")
+    elseif cls == "Accessory" then
+        for _, d in ipairs(obj:GetDescendants()) do
+            if d:IsA("BasePart") then swSet(d, "LocalTransparencyModifier", 1) end
+        end
+    end
+end
+function K.sweepStart()
+    if SW.running then return true end
+    SW.running = true
+    SW.conn = track(workspace.DescendantAdded:Connect(function(o)
+        if SW.running then pcall(swProcess, o) end
+    end))
+    task.spawn(function()
+        local list = workspace:GetDescendants()
+        for i = 1, #list do
+            if not SW.running then return end
+            pcall(swProcess, list[i])
+            if i % 400 == 0 then task.wait() end
+        end
+    end)
+    return true
+end
+function K.sweepStop()
+    SW.running = false
+    if SW.conn then pcall(function() SW.conn:Disconnect() end); SW.conn = nil end
+    for obj, props in pairs(SW.orig) do
+        for p, v in pairs(props) do pcall(function() obj[p] = v end) end
+    end
+    SW.orig = setmetatable({}, { __mode = "k" })
+    return true
+end
+BOOST_FX.sweep = {
+    on = function() return K.sweepStart() end,
+    off = function() return K.sweepStop() end,
+}
+
+function K.lagPresetQuiet(name)
+    if MOD.lag.state ~= "ready" then return end
+    local b = LG.txt and LG.txt[name]
+    if b then K.fireSig(b, "MouseButton1Click") end
+end
+
+-- ---------- auto boost: naikkan tahap optimasi sampai FPS mencapai target ----------
+local AB = { stage = 0, low = 0, cool = 0, needApply = false }
+local AB_STAGES = {
+    { "Ringan", function()
+        K.boostSet("quality", true, true); K.boostSet("unlock", true, true); K.lagPresetQuiet("SAFE")
+    end },
+    { "Sedang", function()
+        K.lagPresetQuiet("BALANCED"); K.boostSet("light", true, true)
+        S.bst.dist = 140; K.boostSet("far", true, true)
+    end },
+    { "Berat", function()
+        K.lagPresetQuiet("MAX"); S.bst.dist = 90; K.boostSet("sweep", true, true)
+    end },
+    { "Ekstrem", function()
+        K.boostSet("mute", true, true); K.lagSlSet("Render Distance", 64, 1024, 64, 192, true)
+    end },
+}
+function K.abStage() return AB.stage end
+function K.abName() return AB.stage > 0 and AB_STAGES[AB.stage][1] or "-" end
+function K.abTick()
+    if S.ab.mode == 0 then return end
+    if AB.needApply and MOD.lag.state == "ready" and not V.lag.running then
+        AB.needApply = false
+        K.lagApply()
+    end
+    local st = K.fpsStats()
+    if not st then return end
+    local maxStage = (S.ab.mode == 1) and 2 or 4
+    AB.low = (st.avg < S.ab.target * 0.85) and (AB.low + 1) or 0
+    local now = os.clock()
+    if AB.low >= 8 and now >= AB.cool and AB.stage < maxStage then
+        AB.stage, AB.cool, AB.low = AB.stage + 1, now + 14, 0
+        AB_STAGES[AB.stage][2]()
+        AB.needApply = true
+        say("warn", "Auto boost naik: tahap " .. AB.stage .. " (" .. AB_STAGES[AB.stage][1] .. ")")
+    end
+end
+function K.abReset()
+    AB.stage, AB.low, AB.needApply = 0, 0, false
+    K.boostNone()
+    K.lagRestore()
+end
+
+-- satu ketukan: semua opsi Plus + preset Seimbang Nono
+function K.turbo()
+    K.boostAll()
+    if MOD.lag.state == "ready" then
+        K.lagPresetQuiet("BALANCED")
+        K.lagApply()
+    end
+end
+
+-- bandingkan FPS sebelum dan sesudah Turbo
+function K.benchmark()
+    if BOOST.bench then return end
+    BOOST.bench = true
+    task.spawn(function()
+        FT.buf, FT.n = {}, 0
+        say("info", "Benchmark: mengukur FPS awal (6 dtk)")
+        task.wait(6)
+        local a = K.fpsStats()
+        K.turbo()
+        FT.buf, FT.n = {}, 0
+        say("info", "Benchmark: Turbo diterapkan, mengukur lagi (12 dtk)")
+        task.wait(12)
+        local b = K.fpsStats()
+        BOOST.bench = false
+        if a and b then
+            say("ok", string.format("Benchmark: %d ke %d FPS (1%% low %d ke %d)",
+                math.floor(a.avg + 0.5), math.floor(b.avg + 0.5), math.floor(a.low1 + 0.5), math.floor(b.low1 + 0.5)))
+        else
+            say("warn", "Benchmark: data FPS kurang")
+        end
+    end)
 end
 
 -- ---------- pulihkan GUI asli dan tutup ----------
@@ -4648,7 +4835,7 @@ function UI.setHP(frac)
     end
 end
 onTheme(function() UI.hpLast = -1 end)
-UI.cap = label(UI.hd, "BY DUKE · 0/3 AKTIF", 10, TH.mute, MONO, { Position = UDim2.fromOffset(14, 46), Size = UDim2.new(1, -160, 0, 14) })
+UI.cap = label(UI.hd, "BY DUKE Â· 0/3 AKTIF", 10, TH.mute, MONO, { Position = UDim2.fromOffset(14, 46), Size = UDim2.new(1, -160, 0, 14) })
 UI.hpTxt = label(UI.hd, "HP 100%", 10, TH.brand, MONO, { Position = UDim2.fromOffset(14, 46), Size = UDim2.new(1, -160, 0, 14), TextXAlignment = Enum.TextXAlignment.Right })
 onTheme(function() UI.hpTxt.TextColor3 = TH.brand end)
 
@@ -4751,7 +4938,7 @@ new("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = WHITE, Backgroun
 local fdot = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, 12, 0.5, -3), BackgroundColor3 = TH.brand, BorderSizePixel = 0 }, foot)
 corner(fdot, 3); onTheme(function() fdot.BackgroundColor3 = TH.brand end)
 label(foot, "BY DUKE", 11, TH.bone, BLACK, { Position = UDim2.fromOffset(24, 0), Size = UDim2.new(0.4, 0, 1, 0) })
-label(foot, "SKILL ISSUE FINAL BOSS · v" .. VERSION, 10, TH.mute, MONO, { Position = UDim2.new(0.3, 0, 0, 0), Size = UDim2.new(0.7, -12, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
+label(foot, "SKILL ISSUE FINAL BOSS Â· v" .. VERSION, 10, TH.mute, MONO, { Position = UDim2.new(0.3, 0, 0, 0), Size = UDim2.new(0.7, -12, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
 
 UI.toasts = new("Frame", { Size = UDim2.new(1, -24, 0, 0), AutomaticSize = AUTO_Y, AnchorPoint = Vector2.new(0.5, 0),
     Position = UDim2.new(0.5, 0, 0, HDR + TABH + 8), BackgroundTransparency = 1, ZIndex = 30 }, UI.win)
@@ -5309,8 +5496,8 @@ do
         sUp.Text = mmss(os.clock() - START)
     end)
 
-    W.spark(p, HIST.fps, 144, col, "FPS · 40 DETIK TERAKHIR", "")
-    W.spark(p, HIST.ping, 300, colPing, "PING · 40 DETIK TERAKHIR", " ms")
+    W.spark(p, HIST.fps, 144, col, "FPS Â· 40 DETIK TERAKHIR", "")
+    W.spark(p, HIST.ping, 300, colPing, "PING Â· 40 DETIK TERAKHIR", " ms")
 
     local function dotOf(key, onFn)
         return function()
@@ -5323,7 +5510,7 @@ do
     local function stateSub(key, readyFn)
         return function()
             local m = MOD[key]
-            if m.state == "loading" then return "Memuat modul…" end
+            if m.state == "loading" then return "Memuat modulâ€¦" end
             if m.state == "gone" then return "Dilepas" end
             if m.state ~= "ready" then return "Tidak tersedia" end
             return readyFn()
@@ -5333,20 +5520,20 @@ do
     local c1 = W.card(p)
     do
         local row = W.row(c1, "Gym bot", stateSub("gym", function()
-            return string.format("Level %s · %s", tostring(K.cget("gym", "Level") or "?"), K.gymGet() and "berjalan" or "mati")
+            return string.format("Level %s Â· %s", tostring(K.cget("gym", "Level") or "?"), K.gymGet() and "berjalan" or "mati")
         end), false, 0, 16)
         W.dot(row, dotOf("gym", function() return K.gymGet() end))
     end
     do
         local row = W.row(c1, "Combat tools", stateSub("war", function()
-            return string.format("Parry %s · lock %s", K.warGet("parry") and "aktif" or "mati", K.warGet("lock") and "aktif" or "mati")
+            return string.format("Parry %s Â· lock %s", K.warGet("parry") and "aktif" or "mati", K.warGet("lock") and "aktif" or "mati")
         end), false, 0, 16)
         W.dot(row, dotOf("war", function() return K.warGet("parry") or K.warGet("lock") end))
     end
     do
         local row = W.btnRight(c1, "Anti-lag", stateSub("lag", function()
             if V.lag.running then return "Memproses " .. V.lag.prog .. "%" end
-            if V.lag.applied then return "Aktif · " .. V.lag.hidden .. " part disembunyikan" end
+            if V.lag.applied then return "Aktif Â· " .. V.lag.hidden .. " part disembunyikan" end
             return "Belum diterapkan"
         end), function() return V.lag.applied and "Terapkan ulang" or "Terapkan" end, K.lagApply)
         W.dot(row, dotOf("lag", function() return V.lag.applied end))
@@ -5383,7 +5570,7 @@ do
         local m, g = MOD.gym, V.gym
         if m.state ~= "ready" then gst.Text = K.modNote(m); setBar(0, TH.mute); return end
         if g.maxed then gst.Text = "Stat sudah maksimal"; setBar(100, TH.on)
-        elseif K.gymGet() and g.gymming then gst.Text = "Sedang latihan · notifikasi gain: " .. g.gains; setBar(60, TH.on)
+        elseif K.gymGet() and g.gymming then gst.Text = "Sedang latihan Â· notifikasi gain: " .. g.gains; setBar(60, TH.on)
         elseif K.gymGet() then gst.Text = "Bot aktif, menunggu kamu masuk mesin gym"; setBar(0, TH.on)
         else gst.Text = "Bot mati. Nyalakan lalu berdiri di mesin gym"; setBar(0, TH.mute) end
     end)
@@ -5514,7 +5701,7 @@ do
                     r.fl.Size = UDim2.new(d.mean, 0, 1, 0)
                 end
             end
-            sum.Text = string.format("%d animasi dipelajari dari %d · %d bersampel kecil (n<=2) · %d sudah penuh", st.learned, st.total, st.low, st.capped)
+            sum.Text = string.format("%d animasi dipelajari dari %d Â· %d bersampel kecil (n<=2) Â· %d sudah penuh", st.learned, st.total, st.low, st.capped)
             note.Text = st.zero and "Entri Animation#0 kemungkinan campuran beberapa serangan tanpa ID, jadi rata-ratanya kurang akurat." or ""
         end)
         W.btnRow(box, {
@@ -5595,6 +5782,7 @@ do
 
     -- ===== Anti-lag Plus (sisi hub) =====
     W.heading(p, "Anti-lag plus")
+    local CAPS_UI = { 60, 120, 165, 240, 300 }
     local fs = W.grid(p, { { "avg", "Rata-rata" }, { "low", "1% low" }, { "min", "Terendah" }, { "max", "Tertinggi" } })
     local lastS = 0
     reg(function()
@@ -5619,7 +5807,11 @@ do
         padd(sc, 8, 0, 10, 0); vlist(sc, 6)
         label(sc, "Batas FPS (MAX = tanpa batas)", 11, TH.mute, FS, { Size = UDim2.new(1, 0, 0, 14), LayoutOrder = nextLO() })
         W.seg(sc, { "60", "120", "165", "240", "MAX" }, function() return S.bst.cap end,
-            function(i) S.bst.cap = i; K.saveSoon(); if S.bst.unlock then K.setCap() end end)
+            function(i)
+                S.bst.cap = i; K.saveSoon(); K.capReset()
+                if S.bst.unlock then K.setCap() end
+                K.lagSlSet("FPS Cap (bypass)", 30, 300, 5, math.min(CAPS_UI[i], 300), true)
+            end)
     end
     W.toggle(cp, "Mode AFK", "Matikan render 3D. Layar game hitam, GUI tetap. Aman buat AFK farming.",
         function() return K.boostGet("render3d") end, function() K.boostFlip("render3d") end)
@@ -5633,7 +5825,39 @@ do
         function() return K.boostGet("far") end, function() K.boostFlip("far") end)
     W.slider(cp, "Jarak sembunyi", 60, 300, 10, " stud", function() return S.bst.dist end,
         function(v, final) S.bst.dist = v; if final then K.saveSoon() end end)
-    W.btnRow(p, { { "Terapkan Plus", "pri", K.boostAll }, { "Pulihkan Plus", "norm", K.boostNone } })
+    do
+        local capM = W.chipRow(cp, "Jalur cap FPS", nil)
+        local capE = W.chipRow(cp, "Cap efektif", nil)
+        reg(function()
+            capM(K.capText(), TH.mute)
+            local n = K.capNote()
+            capE(n or "-", (n and n:find("Terbuka", 1, true)) and TH.on or ((n and n:find("Tertahan", 1, true)) and TH.err or TH.mute))
+        end)
+    end
+    W.toggle(cp, "Sapu visual lanjutan", "Highlight, awan, papan nama, baju dan aksesori pemain lain",
+        function() return K.boostGet("sweep") end, function() K.boostFlip("sweep") end)
+
+    W.heading(p, "Auto boost")
+    local ca = W.card(p)
+    do
+        local box = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = nextLO() }, ca)
+        padd(box, 10, 0, 10, 0); vlist(box, 8)
+        label(box, "Menaikkan tahap optimasi otomatis sampai FPS mencapai target. Tekan Pulihkan untuk kembali.", 11, TH.mute, FS,
+            { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
+        W.seg(box, { "Mati", "Seimbang", "Agresif" }, function() return S.ab.mode + 1 end,
+            function(i) S.ab.mode = i - 1; K.saveSoon(); log("Auto boost: " .. ({ "mati", "seimbang", "agresif" })[i]) end)
+        local setBar = W.meter(box)
+        local stl = label(box, "", 12, TH.bone, FB, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
+        reg(function()
+            local stg = K.abStage()
+            setBar(stg / 4 * 100, stg > 0 and TH.amb or TH.mute)
+            stl.Text = (S.ab.mode == 0) and "Auto boost mati" or ("Tahap " .. stg .. " dari 4 Â· " .. K.abName())
+        end)
+    end
+    W.slider(ca, "Target FPS", 30, 240, 5, "", function() return S.ab.target end,
+        function(v, final) S.ab.target = v; if final then K.saveSoon() end end)
+
+    W.btnRow(p, { { "TURBO", "pri", K.turbo, 2 }, { "Benchmark", "norm", K.benchmark, 1 }, { "Pulihkan", "norm", K.abReset, 1 } })
 end
 
 -- ---------- Setelan ----------
@@ -5699,7 +5923,7 @@ do
             chips[it[1]] = b
         end
         reg(function()
-            for id, b in pairs(chips) do b.Text = (BIND.id == id) and "tekan tombol…" or S.hk[id] end
+            for id, b in pairs(chips) do b.Text = (BIND.id == id) and "tekan tombolâ€¦" or S.hk[id] end
         end)
         local hint = label(c2, "Ketuk tombol lalu tekan tombol baru. Escape membatalkan.", 11, TH.mute, FS,
             { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, TextWrapped = true, LayoutOrder = nextLO() })
@@ -5730,7 +5954,7 @@ do
             reg(function() local ok, txt = fn(); set(txt, ok and TH.on or TH.mute) end)
         end
         diag("Executor", function() return true, EXEC:sub(1, 22) end)
-        for _, k in ipairs({ "loadstring", "firesignal", "getconnections", "getgc", "upvalues", "debuginfo", "file", "clipboard", "setfpscap", "hiddenprop" }) do
+        for _, k in ipairs({ "loadstring", "firesignal", "getconnections", "getgc", "upvalues", "debuginfo", "file", "clipboard", "setfpscap", "fflag", "hiddenprop" }) do
             diag(k, function() return CAP[k], CAP[k] and "ada" or "tidak ada" end)
         end
         for _, k in ipairs({ "gym", "war", "lag" }) do
@@ -5758,7 +5982,7 @@ do
     W.btnRow(p, { { "Matikan semua dan tutup", "dng", K.shutdownAll, 1, true } })
 
     local c5 = W.card(p)
-    W.row(c5, "Skill issue final boss v" .. VERSION, "By Duke · tiga sistem asli tetap utuh, hub hanya mengendalikannya", false, 0)
+    W.row(c5, "Skill issue final boss v" .. VERSION, "By Duke Â· tiga sistem asli tetap utuh, hub hanya mengendalikannya", false, 0)
 end
 BT = nil
 
@@ -5925,7 +6149,7 @@ reg(function()
     local on = { K.gymGet() == true, (K.warGet("parry") == true) or (K.warGet("lock") == true), MOD.lag.state == "ready" and V.lag.applied }
     local n = 0
     for i = 1, 3 do if on[i] then n = n + 1 end end
-    UI.cap.Text = "BY DUKE · " .. n .. "/3 AKTIF"
+    UI.cap.Text = "BY DUKE Â· " .. n .. "/3 AKTIF"
     UI.setHP(1 - n / 3)
     UI.hpTxt.Text = (n == 3) and "K.O." or ("HP " .. math.floor((1 - n / 3) * 100 + 0.5) .. "%")
     UI.hpTxt.TextColor3 = (n == 3) and TH.on or TH.brand
@@ -5979,7 +6203,7 @@ if S.mini then K.setMini(true) else W.intro() end
 -- =====================================================================
 --  JALANKAN
 -- =====================================================================
-log("Memuat tiga sistem…")
+log("Memuat tiga sistemâ€¦")
 if not K.findGymBtn() then K.loadMod("gym") end
 if not env.__WRAITH12 then K.loadMod("war") end
 K.loadMod("lag")
@@ -6001,7 +6225,11 @@ task.spawn(function()
             end
         end
         if tick % 2 == 0 and S.bst.far then pcall(K.farStep) end
-        if tick % 12 == 0 and S.bst.unlock then pcall(K.setCap) end
+        if tick % 4 == 0 then
+            if S.bst.unlock then pcall(K.setCap) end
+            pcall(K.capWatch)
+            pcall(K.abTick)
+        end
         for _, r in ipairs((OPEN) and REF or REFC) do runR(r) end
         if tick % 8 == 0 and DIRTY and S.autosave then K.saveNow() end
     end
