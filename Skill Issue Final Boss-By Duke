@@ -3229,7 +3229,7 @@ print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", 
 -- =====================================================================
 --  DASAR
 -- =====================================================================
-local VERSION = "1.5"
+local VERSION = "1.5"  -- + fix attach Combat tools (pollWar longgar + timeout)
 
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
@@ -3851,49 +3851,83 @@ end
 -- =====================================================================
 --  COMBAT (WRAITH)
 -- =====================================================================
+-- cari bagian UI Wraith secara longgar: tidak bergantung urutan anak atau posisi piksel.
+-- wajib: tombol PARRY dan tombol LOCK. opsional: pill (buka/tutup panel) dan label info.
+local function warLocate(sg)
+    local pc, lc, info, pill, panel
+    for _, d in ipairs(sg:GetDescendants()) do
+        if d:IsA("TextButton") then
+            local t = tostring(d.Text):upper()
+            if not pc and t:find("^%s*PARRY") then pc = d
+            elseif not lc and t:find("^%s*LOCK") then lc = d end
+        end
+    end
+    if pc and lc then
+        panel = pc.Parent
+        for _, c in ipairs(panel:GetChildren()) do
+            if c:IsA("TextLabel") and (c.Position.Y.Offset == 76 or tostring(c.Text):find("p:%-?%d+ms")) then
+                info = c
+                break
+            end
+        end
+    end
+    for _, c in ipairs(sg:GetChildren()) do
+        if c:IsA("TextButton") and c ~= pc and c ~= lc then pill = c; break end
+    end
+    return pill, panel, pc, lc, info
+end
+
 function K.pollWar()
     local m = MOD.war
     if m.state ~= "ready" then
         local sg = PGui:FindFirstChild("WRAITH_UI")
         if sg then
-            local pill, panel = sg:FindFirstChildWhichIsA("TextButton"), sg:FindFirstChildWhichIsA("Frame")
-            if pill and panel then
-                local pc, lc, info
-                for _, c in ipairs(panel:GetChildren()) do
-                    if c:IsA("TextButton") then
-                        if c.Text:find("^PARRY") then pc = c elseif c.Text:find("^LOCK") then lc = c end
-                    elseif c:IsA("TextLabel") and c.Position.Y.Offset == 76 then
-                        info = c
+            local pill, panel, pc, lc, info = warLocate(sg)
+            if pc and lc and panel then
+                WR.sg, WR.pill, WR.panel, WR.pc, WR.lc, WR.info = sg, pill, panel, pc, lc, info
+                m.state, m.err = "ready", nil
+                sg.Enabled = false
+                K.warInternals()
+                K.muteKeys("war")
+                K.ensureCfg("war")
+                log("Combat tools terhubung", "ok")
+            elseif m.state == "loading" and os.clock() - m.t0 > m.wait then
+                -- WRAITH_UI ada tapi susunannya tidak dikenali: jangan menggantung di "Memuat" selamanya
+                local parts = {}
+                for _, d in ipairs(sg:GetDescendants()) do
+                    if #parts >= 14 then break end
+                    if d:IsA("TextButton") or d:IsA("TextLabel") then
+                        parts[#parts + 1] = d.ClassName .. "(" .. tostring(d.Text):sub(1, 14) .. ")"
                     end
                 end
-                if pc and lc and info then
-                    WR.sg, WR.pill, WR.panel, WR.pc, WR.lc, WR.info = sg, pill, panel, pc, lc, info
-                    m.state, m.err = "ready", nil
-                    sg.Enabled = false
-                    K.warInternals()
-                    K.muteKeys("war")
-                    K.ensureCfg("war")
-                    log("Combat tools terhubung", "ok")
-                end
+                m.state = "missing"
+                m.err = "UI Wraith ada tapi tombol " .. (pc and "LOCK" or "PARRY")
+                    .. " tidak ketemu (Wraith versi lain sudah jalan? rejoin lalu jalankan hub saja)"
+                log("WRAITH_UI berisi: " .. (#parts > 0 and table.concat(parts, ", ") or "kosong"), "warn")
             end
         elseif m.state == "loading" and os.clock() - m.t0 > m.wait then
             m.state = "missing"
+            if env.__WRAITH12 then
+                m.err = "Wraith sudah pernah jalan di sesi ini tapi UI-nya hilang. Rejoin lalu jalankan hub lagi"
+            end
         end
         return
     end
     if not WR.sg or not WR.sg.Parent then m.state = "missing"; m.err = "UI Wraith hilang"; return end
     if WR.sg.Enabled then WR.sg.Enabled = false end
     -- teks tombol dan label cuma diperbarui script asli kalau panelnya terbuka
-    if not WR.panel.Visible and os.clock() - (WR.lastOpen or 0) > 1 then
+    if WR.pill and WR.panel:IsA("GuiObject") and not WR.panel.Visible and os.clock() - (WR.lastOpen or 0) > 1 then
         WR.lastOpen = os.clock()
         K.fireSig(WR.pill, "MouseButton1Click")
     end
     V.war.parry = not WR.pc.Text:find("OFF", 1, true)
     V.war.lockTxt = WR.lc.Text
     V.war.lock = not WR.lc.Text:find("OFF", 1, true)
-    local a, p, mm, l, w = WR.info.Text:match("p:(%d+)ms P:(%d+) M:(%d+) L:(%d+) W:(%d+)%%")
-    if a then
-        V.war.ping, V.war.p, V.war.m, V.war.l, V.war.w = tonumber(a), tonumber(p), tonumber(mm), tonumber(l), tonumber(w)
+    if WR.info then
+        local a, p, mm, l, w = WR.info.Text:match("p:(%d+)ms P:(%d+) M:(%d+) L:(%d+) W:(%d+)%%")
+        if a then
+            V.war.ping, V.war.p, V.war.m, V.war.l, V.war.w = tonumber(a), tonumber(p), tonumber(mm), tonumber(l), tonumber(w)
+        end
     end
     if not CFGT.war then K.ensureCfg("war") end
 end
