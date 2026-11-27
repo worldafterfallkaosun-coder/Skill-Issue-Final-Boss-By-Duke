@@ -7,7 +7,8 @@
     3. Anti-lag      (Nono Anti-Lag v6.0)
 
   Ketiga script asli disisipkan UTUH di bawah (SRC.gym, SRC.war, SRC.lag),
-  tidak ada satu baris pun yang diedit. Hub hanya:
+  tidak ada satu baris pun yang diedit, kecuali satu blok env.WRAITH_API yang
+  ditambahkan di akhir SRC.war (jembatan langsung parry/lock ke hub). Hub hanya:
     - menjalankan script aslinya lewat loadstring,
     - menekan tombol bawaan masing-masing (firesignal / getconnections),
     - membaca label/teks UI bawaan dan tabel internalnya buat status,
@@ -2283,6 +2284,25 @@ env.WRAITH_DUMP = function()
     return s
 end
 
+-- jembatan langsung buat hub SIFB: baca/ubah status parry & lock tanpa lewat UI Wraith
+env.WRAITH_API = {
+    toggleParry = ToggleParry,
+    toggleLock  = ToggleLock,
+    state = function()
+        local tot = Stat.ok + Stat.fail
+        local lt
+        if not Lock.on then lt = "LOCK   OFF"
+        elseif not Lock.target then lt = "LOCK  NEUTRAL"
+        elseif Lock.inCombat then lt = "LOCK  COMBAT"
+        else lt = "LOCK  ACTIVE" end
+        return {
+            parry = Parry.on == true, lock = Lock.on == true, lockTxt = lt,
+            ping = math.floor(GetPing()), p = Parry.parryN, m = Parry.missN, l = LearnedCount(),
+            w = tot > 0 and math.floor(Stat.ok / tot * 100) or 0,
+        }
+    end,
+}
+
 task.spawn(function()
     while env.__WRAITH12 do
         task.wait(25)
@@ -3879,6 +3899,19 @@ end
 
 function K.pollWar()
     local m = MOD.war
+    local api = env.WRAITH_API
+    if m.state ~= "ready" and type(api) == "table" and type(api.state) == "function" then
+        -- jalur langsung: Wraith sudah memasang WRAITH_API, tidak perlu mencocokkan UI-nya sama sekali
+        WR.api = api
+        WR.sg = PGui:FindFirstChild("WRAITH_UI")
+        if WR.sg then WR.sg.Enabled = false end
+        m.state, m.err = "ready", nil
+        K.warInternals()
+        K.muteKeys("war")
+        K.ensureCfg("war")
+        log("Combat tools terhubung (langsung)", "ok")
+        return
+    end
     if m.state ~= "ready" then
         local sg = PGui:FindFirstChild("WRAITH_UI")
         if sg then
@@ -3911,6 +3944,16 @@ function K.pollWar()
                 m.err = "Wraith sudah pernah jalan di sesi ini tapi UI-nya hilang. Rejoin lalu jalankan hub lagi"
             end
         end
+        return
+    end
+    if WR.api then
+        if WR.sg and WR.sg.Parent and WR.sg.Enabled then WR.sg.Enabled = false end
+        local ok, s = pcall(WR.api.state)
+        if ok and type(s) == "table" then
+            V.war.parry, V.war.lock, V.war.lockTxt = s.parry, s.lock, s.lockTxt
+            V.war.ping, V.war.p, V.war.m, V.war.l, V.war.w = s.ping, s.p, s.m, s.l, s.w
+        end
+        if not CFGT.war then K.ensureCfg("war") end
         return
     end
     if not WR.sg or not WR.sg.Parent then m.state = "missing"; m.err = "UI Wraith hilang"; return end
@@ -4096,7 +4139,12 @@ end
 function K.setWarRaw(k, v)
     if not K.ready(MOD.war) then return end
     if K.warReal(k) == v then return end
-    K.fireSig(k == "parry" and WR.pc or WR.lc, "MouseButton1Click"); opt(k, v)
+    if WR.api then
+        pcall(k == "parry" and WR.api.toggleParry or WR.api.toggleLock)
+    else
+        K.fireSig(k == "parry" and WR.pc or WR.lc, "MouseButton1Click")
+    end
+    opt(k, v)
     log((k == "parry" and "Auto parry" or "Combat lock") .. (v and " dinyalakan" or " dimatikan"), v and "ok" or "info")
 end
 -- dengan gerbang cerdas aktif, "parry" adalah niat pengguna; gerbang yang menyalakan/mematikan sesungguhnya
