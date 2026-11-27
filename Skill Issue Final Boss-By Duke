@@ -11,6 +11,8 @@
   v1.7: auto clash ditulis ulang (SRC.clash v2): tap gaya manusia (jeda acak, jeda reaksi, batas per detik),
         laju adaptif biar menang, pilihan mode Aman/Agresif di tab Combat. Combat lock + auto parry
         berhenti selama clash/hug (SRC.war, ditandai "v1.7") biar karakter gak mental.
+  v1.7: slider anti-lag (Batas FPS, Jarak render): pencarian slider diulang + cocok longgar, plus jalur
+        cadangan lewat getgc kalau executor tanpa getconnections; pesan gagal sekarang nyebut penyebabnya.
   v1.6: SRC.war dapat 4 patch kecil (ditandai "v1.6" di komentar) buat masalah parry->block setelah patch game.
 
   Ketiga script asli disisipkan UTUH di bawah (SRC.gym, SRC.war, SRC.lag),
@@ -4376,6 +4378,48 @@ local function sib(lbl)
     end
 end
 
+-- v1.7: cari slider Nono (FPS Cap + Render Distance). Bisa dipanggil ulang kalau slider belum ketemu,
+-- dan teksnya dicocokkan longgar (huruf besar/kecil, tambahan kata) setelah pencocokan persis.
+function K.scanLagSliders()
+    if not (LG.scroll and LG.scroll.Parent) then return end
+    LG.sl = LG.sl or {}
+    local defs = { { "FPS Cap (bypass)", "fps cap" }, { "Render Distance", "render dist" } }
+    local function try(name, l)
+        local top = l.Parent
+        local frame = top and top.Parent
+        if not frame then return false end
+        local trk, hit
+        for _, c in ipairs(frame:GetChildren()) do
+            if c:IsA("Frame") and c ~= top then trk = c end
+        end
+        if trk then
+            for _, c in ipairs(trk:GetChildren()) do
+                if c:IsA("TextButton") and c.Size.X.Scale == 1 then hit = c end
+            end
+        end
+        if not (trk and hit) then return false end
+        LG.sl[name] = { track = trk, hit = hit, val = sib(l), last = 0 }
+        return true
+    end
+    for _, def in ipairs(defs) do
+        local name, key = def[1], def[2]
+        local old = LG.sl[name]
+        if not (old and old.val and old.val.Parent and old.track and old.track.Parent and old.hit) then
+            local list = LG.scroll:GetDescendants()
+            local done = false
+            for pass = 1, 2 do
+                for _, l in ipairs(list) do
+                    if l:IsA("TextLabel") and #l.Text < 32 then
+                        local hitText = (pass == 1) and (l.Text == name) or (pass == 2 and l.Text:lower():find(key, 1, true) ~= nil)
+                        if hitText and try(name, l) then done = true; break end
+                    end
+                end
+                if done then break end
+            end
+        end
+    end
+end
+
 function K.attachLag()
     local sg = PGui:FindFirstChild("NonoAntiLag")
     local main = sg and sg:FindFirstChild("Main")
@@ -4410,23 +4454,7 @@ function K.attachLag()
         end
     end
     LG.sl = {}
-    for _, name in ipairs({ "FPS Cap (bypass)", "Render Distance" }) do
-        local l = txt[name]
-        if l then
-            local top = l.Parent
-            local frame = top.Parent
-            local trk, hit
-            for _, c in ipairs(frame:GetChildren()) do
-                if c:IsA("Frame") and c ~= top then trk = c end
-            end
-            if trk then
-                for _, c in ipairs(trk:GetChildren()) do
-                    if c:IsA("TextButton") and c.Size.X.Scale == 1 then hit = c end
-                end
-            end
-            LG.sl[name] = { track = trk, hit = hit, val = sib(l), last = 0 }
-        end
-    end
+    pcall(K.scanLagSliders)  -- v1.7: pencarian slider dipisah supaya bisa diulang
     return true
 end
 
@@ -4585,28 +4613,82 @@ function K.lagTgFlip(name)
     if t and t.btn then K.fireSig(t.btn, "MouseButton1Click") end
 end
 function K.lagSlGet(name)
+    if MOD.lag.state ~= "ready" then return nil end
     local s = LG.sl and LG.sl[name]
-    if MOD.lag.state ~= "ready" or not s or not s.val then return nil end
-    return tonumber(s.val.Text)
+    if not (s and s.val and s.val.Parent) then
+        -- v1.7: slider belum ketemu waktu attach -> cari ulang (maksimal 1x per detik)
+        if os.clock() - (LG.slScanT or 0) > 1 then
+            LG.slScanT = os.clock()
+            pcall(K.scanLagSliders)
+        end
+        s = LG.sl and LG.sl[name]
+    end
+    if not s or not s.val then return nil end
+    return tonumber(tostring(s.val.Text):match("%d+%.?%d*"))
 end
--- slider anti-lag: input tiruan ke slider aslinya, dilepas lewat handler InputEnded milik Nono
+
+-- v1.7: jalur cadangan tanpa getconnections. Cari tabel slider milik Nono lewat getgc (punya set,
+-- fromX, onChange), kenali slider mana lewat batas min/max di upvalue fungsi set, lalu panggil langsung.
+function K.lagDirect(name, mn, mx, v)
+    if not (CAP.getgc and CAP.upvalues) then return false end
+    LG.direct = LG.direct or {}
+    local d = LG.direct[name]
+    if not d then
+        local ok, list = pcall(getgc, true)
+        if not ok or type(list) ~= "table" then return false end
+        for i = 1, #list do
+            local t = list[i]
+            if type(t) == "table" and type(rawget(t, "set")) == "function"
+                and type(rawget(t, "fromX")) == "function" and type(rawget(t, "onChange")) == "function" then
+                local hasMn, hasMx = false, false
+                for _, u in ipairs(K.getUps(rawget(t, "set"))) do
+                    if u == mn then hasMn = true end
+                    if u == mx then hasMx = true end
+                end
+                if hasMn and hasMx then d = t; break end
+            end
+        end
+        if not d then return false end
+        LG.direct[name] = d
+    end
+    local ok, nv = pcall(d.set, v)
+    if not ok then LG.direct[name] = nil; return false end
+    pcall(d.onChange, nv)
+    return true
+end
+
+-- slider anti-lag: jalur 1 = input tiruan ke slider aslinya (getconnections), jalur 2 = panggil langsung (getgc)
 function K.lagSlSet(name, mn, mx, step, v, final)
     if MOD.lag.state ~= "ready" then return end
     local s = LG.sl[name]
-    if not s or not s.track or not s.hit or not CAP.getconnections or #MOD.lag.ended == 0 then
-        if final then toast("Slider anti-lag butuh executor dengan getconnections", "warn") end
-        return
+    if not (s and s.track and s.hit) then
+        pcall(K.scanLagSliders)
+        s = LG.sl[name]
     end
     local now = os.clock()
-    if not final and now - s.last < 0.12 then return end
-    s.last = now
-    local pct = math.clamp((v - mn + step * 0.25) / (mx - mn), 0, 1)
-    local pos = Vector3.new(s.track.AbsolutePosition.X + pct * s.track.AbsoluteSize.X, s.track.AbsolutePosition.Y + 3, 0)
-    local function fake(state)
-        return { UserInputType = Enum.UserInputType.MouseButton1, UserInputState = state, Position = pos, KeyCode = Enum.KeyCode.Unknown }
+    if s and not final and now - s.last < 0.12 then return end
+    if s then s.last = now end
+
+    if s and s.track and s.hit and CAP.getconnections and #MOD.lag.ended > 0 then
+        local pct = math.clamp((v - mn + step * 0.25) / (mx - mn), 0, 1)
+        local pos = Vector3.new(s.track.AbsolutePosition.X + pct * s.track.AbsoluteSize.X, s.track.AbsolutePosition.Y + 3, 0)
+        local function fake(state)
+            return { UserInputType = Enum.UserInputType.MouseButton1, UserInputState = state, Position = pos, KeyCode = Enum.KeyCode.Unknown }
+        end
+        pcall(function() for _, c in ipairs(getconnections(s.hit.InputBegan)) do c:Fire(fake(Enum.UserInputState.Begin)) end end)
+        for _, c in ipairs(MOD.lag.ended) do pcall(function() c:Fire(fake(Enum.UserInputState.End)) end) end
+        return
     end
-    pcall(function() for _, c in ipairs(getconnections(s.hit.InputBegan)) do c:Fire(fake(Enum.UserInputState.Begin)) end end)
-    for _, c in ipairs(MOD.lag.ended) do pcall(function() c:Fire(fake(Enum.UserInputState.End)) end) end
+    if K.lagDirect(name, mn, mx, v) then return end
+
+    if final then
+        local why
+        if not s then why = "slider tidak ketemu di UI Nono"
+        elseif not CAP.getconnections and not (CAP.getgc and CAP.upvalues) then why = "executor tanpa getconnections dan getgc"
+        elseif CAP.getconnections and #MOD.lag.ended == 0 then why = "handler lepas-slider Nono tidak ketemu"
+        else why = "tabel slider Nono tidak ketemu lewat getgc" end
+        toast("Slider " .. name .. " gagal: " .. why, "warn")
+    end
 end
 
 function K.cfgNote()
