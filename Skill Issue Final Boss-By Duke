@@ -1,10 +1,17 @@
 --[[
-  SKILL ISSUE FINAL BOSS v1.5  |  By Duke
+  SKILL ISSUE FINAL BOSS v1.7  |  By Duke
 
   Satu hub untuk tiga sistem:
     1. Gym bot       (auto gym, High School Anime)
     2. Combat tools  (auto parry + combat lock, Wraith v13.4)
     3. Anti-lag      (Nono Anti-Lag v6.0)
+
+  v1.6: modul ke-4 "Auto clash" (SRC.clash): ngetap otomatis di clash battle sampai selesai.
+        Toggle ada di tab Combat, hotkey F5.
+  v1.7: auto clash ditulis ulang (SRC.clash v2): tap gaya manusia (jeda acak, jeda reaksi, batas per detik),
+        laju adaptif biar menang, pilihan mode Aman/Agresif di tab Combat. Combat lock + auto parry
+        berhenti selama clash/hug (SRC.war, ditandai "v1.7") biar karakter gak mental.
+  v1.6: SRC.war dapat 4 patch kecil (ditandai "v1.6" di komentar) buat masalah parry->block setelah patch game.
 
   Ketiga script asli disisipkan UTUH di bawah (SRC.gym, SRC.war, SRC.lag),
   tidak ada satu baris pun yang diedit, kecuali satu blok env.WRAITH_API yang
@@ -19,7 +26,7 @@
   saat hub ditutup.
 
   Tombol bulat: ketuk = buka/tutup | tahan = mode ringkas | tarik = pindah
-  Hotkey default: RightAlt hub | F1 gym | F2 parry | F3 lock | F4 anti-lag
+  Hotkey default: RightAlt hub | F1 gym | F2 parry | F3 lock | F4 anti-lag | F5 auto clash
   Konfigurasi tersimpan di SIFB_config.json (jika executor punya writefile)
 ]]
 
@@ -841,8 +848,14 @@ local function LearnDelay(name, obs)
     if not e then
         HD[name] = {d = obs, n = 1}
     else
-        if e.n >= 3 and math.abs(obs - e.d) > 0.22 then return end -- outlier (combo chain etc.)
-        if e.n < 3 and math.abs(obs - e.d) > 0.40 then return end
+        local dev = math.abs(obs - e.d)
+        if (e.n >= 3 and dev > 0.22) or (e.n < 3 and dev > 0.40) then
+            -- v1.6: outlier yang konsisten 3x berturut-turut = timing animasi berubah (patch) -> reset
+            if e.o and math.abs(obs - e.o) <= 0.08 then e.oc = (e.oc or 1) + 1 else e.o = obs; e.oc = 1 end
+            if e.oc >= 3 then HD[name] = {d = obs, n = 1}; _dirty = true end
+            return
+        end
+        e.o = nil; e.oc = nil
         local w = (e.n < 3) and 0.50 or 0.35
         e.d = e.d * (1 - w) + obs * w
         e.n = math.min(e.n + 1, 50)
@@ -861,6 +874,12 @@ local function HDLoad()
         return HttpService:JSONDecode(readfile(CFG.SaveFile))
     end)
     if not ok or type(data) ~= "table" then return end
+    -- v1.6: timing hasil belajar sebelum game di-update itu basi -> buang kalau PlaceVersion beda
+    local okv, pv = pcall(function() return game.PlaceVersion end)
+    if okv and tonumber(data.pv) ~= pv then
+        print("[WRAITH] game ter-update (PlaceVersion " .. tostring(pv) .. "), timing lama dibuang, belajar ulang")
+        return
+    end
     if type(data.hd) == "table" then
         for name, e in pairs(data.hd) do
             if type(name) == "string" and type(e) == "table" and tonumber(e.d) and tonumber(e.n) then
@@ -884,7 +903,8 @@ local function HDSave(force)
     if not force and now - _saveT < 20 then return end
     _saveT = now; _dirty = false
     pcall(function()
-        writefile(CFG.SaveFile, HttpService:JSONEncode({ hd = HD, lead = { a = Lead.a, b = Lead.b, n = Lead.n } }))
+        local okv, pv = pcall(function() return game.PlaceVersion end)
+        writefile(CFG.SaveFile, HttpService:JSONEncode({ pv = okv and pv or nil, hd = HD, lead = { a = Lead.a, b = Lead.b, n = Lead.n } }))
     end)
 end
 HDLoad()
@@ -1353,7 +1373,7 @@ local function HoldLoop()
             local gv = char and char:GetAttribute("GuardValue")
             if typeof(gv) ~= "number" then gv = 1 end
             local act = HoldActive(now, gv)
-            local broken = char and char:GetAttribute("GuardBroken") == true
+            local broken = char and (char:GetAttribute("GuardBroken") == true or (char:GetAttribute("GuardLocked") and true or false))
             if act and not broken then
                 local gap = 0
                 if Hold.down then gap = CFG.HoldRefresh and HoldInterval() or 9e9 end
@@ -1452,6 +1472,46 @@ end
 GuardLogHook(LP.Character)
 LP.CharacterAdded:Connect(GuardLogHook)
 
+-- v1.6: hit yang ke-BLOCK (guard turun, HP gak turun, bukan parry) = block kita mulai kecepetan
+-- (atau hit kedua dari kombo yang timestamp parry-nya udah kepake). Dulu hasil ini gak ngasih
+-- sinyal apa-apa, jadi timing basi gak pernah ke-koreksi. Sekarang dipakai buat ngoreksi
+-- hit-delay animasinya + nurunin skor lead yang dipakai.
+Hold.guardLearn = function(char)
+    if not char then return end
+    local last = char:GetAttribute("GuardValue")
+    if typeof(last) ~= "number" then last = 1 end
+    char:GetAttributeChangedSignal("GuardValue"):Connect(function()
+        local v = char:GetAttribute("GuardValue")
+        if typeof(v) ~= "number" then return end
+        local dropped = v < last - 0.005
+        last = v
+        if not dropped then return end
+        local t0 = os.clock()
+        task.delay(0.15, function()
+            if math.abs(Hold.parryT - t0) <= 0.15 then return end            -- parry sukses
+            if math.abs((Hold.hpDropT or -9) - t0) <= 0.25 then return end   -- kena damage (jalur HP udah belajar)
+            local bk, bd = nil, 0.50
+            for k, p in ipairs(Pend) do
+                local d = math.abs(t0 - p.H)
+                if d < bd then bd, bk = d, k end
+            end
+            if not bk then return end
+            local p = table.remove(Pend, bk)
+            local e = p.name and HD[p.name]
+            if e then LearnDelay(p.name, e.d + (t0 - p.H)) end
+            Lead:report(p.i, false)
+            Stat.fail = Stat.fail + 1
+            _dirty = true
+            if CFG.GuardLog then
+                print(string.format("[WRAITH] ke-block bukan parry | %s | hit %+.0fms dari prediksi",
+                    tostring(p.name), (t0 - p.H) * 1000))
+            end
+        end)
+    end)
+end
+Hold.guardLearn(LP.Character)
+LP.CharacterAdded:Connect(Hold.guardLearn)
+
 -- ============================================================
 --  SPAM LOCK (dipertahankan buat kompatibilitas; DoBurst gak pakai lagi)
 -- ============================================================
@@ -1524,7 +1584,16 @@ local function CanFire(ps, urg)
     return true
 end
 
+-- v1.7: true selama clash/hug (env.CLASH_UNTIL dari SRC.clash, atau UI ClashBattleUI masih ada)
+function Parry.clashHold()
+    local u = env.CLASH_UNTIL
+    if u and os.clock() < u then return true end
+    local pg = LP:FindFirstChildOfClass("PlayerGui")
+    return pg ~= nil and pg:FindFirstChild("ClashBattleUI") ~= nil
+end
+
 local function FireParry(heavy, ps, urg, track, name, t0)
+    if Parry.clashHold() then return false end  -- v1.7
     local rdl=RDL.on or urg=="ragdoll"
     local fast=rdl or urg=="prearm"
     if fast then Parry.firing=false;Parry.fireAt=0;Parry.nextFire=0;spamLock=false;spamLockT=0 end
@@ -1853,6 +1922,7 @@ end) end
 -- ============================================================
 local function LockBlocked()
     local c=LP.Character; if not c then return true end
+    if Parry.clashHold() then return true end  -- v1.7
     for _,s in ipairs(KO_ATTRS) do if c:GetAttribute(s)==true then return true end end
     return false
 end
@@ -1869,6 +1939,7 @@ local function DestroyCon()
 end
 local function SetupCon()
     local root=MC.root; if not root then return end
+    if Parry.clashHold() then return end  -- v1.7: jangan pasang AlignOrientation pas clash/hug
     if Lock.alignOri and Lock.alignOri.Parent==root then return end
     DestroyCon()
     local att=Instance.new("Attachment"); att.Name=ATT_NAME; att.Parent=root; Lock.att0=att
@@ -1948,6 +2019,11 @@ end
 RunService.Heartbeat:Connect(function(dt)
     if os.clock()-Lock.combatT>5.0 then Lock.inCombat=false end
     if not Lock.on then return end
+    -- v1.7: pas clash/hug server nge-pin karakter; AlignOrientation (torque 1e6) berantem sama pin itu -> karakter mental
+    if Parry.clashHold() then
+        if Lock.alignOri then DestroyCon() end
+        return
+    end
 
     if not CL.active then
         if Lock.target then UnlockTarget() end
@@ -1961,6 +2037,7 @@ RunService.Heartbeat:Connect(function(dt)
 
     local ec=Lock.target.Character; if not ec then return end
     local er=ec:FindFirstChild("HumanoidRootPart"); if not er then return end
+    SetupCon()  -- v1.7: pasang ulang AlignOrientation setelah clash selesai (no-op kalau sudah ada)
     UpdVel(er.Position)
     local ap=er.Position+Lock.vel*LCFG.Pred
     SetAim(Vector3.new(ap.X, ap.Y+1.5, ap.Z))
@@ -2034,6 +2111,7 @@ local function HookSelf(char)
             local drop=prevHP-cur
             prevHP=cur
             if drop < 0.5 then return end
+            Hold.hpDropT = os.clock()
             MarkCombat(); PendFail()
             local t=FindAttacker()
             if t then
@@ -3245,11 +3323,321 @@ print("[NONO v6.0] loaded | setfpscap:", HAS_SETFPSCAP, "| sethiddenproperty:", 
     "| file:", HAS_FILE)
 
 ]=====]
+SRC.clash = [=====[
+-- ============================================================
+--  CLASH AUTO v2.0 — High School Anime ("Tata Letak Sekolah Baru")
+--
+--  Cara kerja game (dibaca dari ClashBattleClient, snapshot 27 Nov):
+--    server -> client  ClashBattle:"Start"(myChar, enemyChar, side, startsAt, endsAt, seed)
+--    tiap tap          -> ClashTap:FireServer(tapIndex)   (tapIndex naik 1 tiap tap)
+--    server -> client  ClashBattleState(power, ...)  power*side > 0 = kita unggul
+--
+--  v2.0:
+--    - Tap gaya manusia: jeda antar-tap acak (lognormal), paling banyak 1 tap per frame,
+--      jeda reaksi 0.18-0.38 dtk sebelum tap pertama, jeda kecil berkala (mirip salah tombol,
+--      di game MissLockout = 0.12 dtk), laju hanyut pelan, plus batas keras per 1 detik (Cap).
+--      Gak ada lagi burst 2 tap/frame atau laju 22/dtk yang jelas bukan tangan.
+--    - Auto-win: laju naik otomatis kalau ketinggalan (sampai Max), turun kalau unggul.
+--      Mode AMAN (default) sengaja dibatasi: kalau lawan lebih cepat dari batas itu, bisa kalah.
+--      Mode AGRESIF menaikkan batasnya, tapi lebih gampang kelihatan.
+--    - Anti-mental pas hug/clash: modul ini menandai fase clash lewat env.CLASH_UNTIL, dan
+--      combat lock + auto parry (SRC.war) berhenti selama fase itu.
+--    - Diagnostik fisika (CFG.Diag): akhir clash dicetak kecepatan root maksimal dan daftar
+--      mover/constraint di karakter, buat nyari penyebab kalau masih mental.
+-- ============================================================
+
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local RS         = game:GetService("ReplicatedStorage")
+local LP         = Players.LocalPlayer
+local env        = (getgenv and getgenv()) or _G
+
+if env.__CLASHBOT_STOP then pcall(env.__CLASHBOT_STOP) end
+
+-- tap/detik. Base = waktu unggul, Max = waktu ketinggalan, Cap = batas keras per jendela 1 detik
+local PROFILES = {
+    safe = { Base = 7.5,  Max = 11.0, Cap = 12 },
+    push = { Base = 10.0, Max = 14.5, Cap = 16 },
+}
+
+local CFG = {
+    Enabled  = true,
+    Mode     = "safe",   -- "safe" | "push"
+    ReactMin = 0.18,     -- jeda reaksi setelah startsAt (detik)
+    ReactMax = 0.38,
+    Hesitate = 0.5,      -- peluang jeda kecil tiap 6-14 tap
+    Log      = true,
+    Diag     = true,
+}
+
+local TAP_STEP = 0.03  -- TapStep di ClashBattleClient (animasi bar lokal)
+
+local alive, conns = true, {}
+local run, diag = nil, nil
+
+local function say(msg)
+    if CFG.Log then print("[CLASH] " .. msg) end
+end
+
+local CR          = RS:WaitForChild("CombatRemotes", 15)
+local ClashBattle = CR and CR:WaitForChild("ClashBattle", 10)
+local ClashTap    = CR and CR:WaitForChild("ClashTap", 10)
+if not (ClashBattle and ClashTap) then
+    warn("[CLASH] remote clash tidak ketemu (game ter-update?)")
+    return
+end
+
+local function randn()
+    local u1 = math.max(math.random(), 1e-6)
+    return math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * math.random())
+end
+
+-- penanda fase clash, dibaca combat lock / auto parry di SRC.war
+local function holdFor(sec)
+    env.CLASH_UNTIL = os.clock() + sec
+end
+
+local function findSession()
+    if not getgc then return nil end
+    local ok, list = pcall(getgc, true)
+    if not ok or type(list) ~= "table" then return nil end
+    local myChar = LP.Character
+    for i = 1, #list do
+        local t = list[i]
+        if type(t) == "table"
+            and rawget(t, "tapIndex") ~= nil and rawget(t, "myTapsLocal") ~= nil
+            and rawget(t, "endsAt") ~= nil and rawget(t, "ended") == false
+            and rawget(t, "myChar") == myChar then
+            return t
+        end
+    end
+    return nil
+end
+
+-- ---------- diagnostik fisika ----------
+local MOVERS = {
+    "AlignOrientation", "AlignPosition", "BodyVelocity", "BodyGyro", "BodyPosition", "BodyForce",
+    "LinearVelocity", "AngularVelocity", "VectorForce", "BallSocketConstraint", "RopeConstraint",
+    "SpringConstraint",
+}
+
+local function listMovers(char)
+    local out = {}
+    if not char then return out end
+    for _, d in ipairs(char:GetDescendants()) do
+        for _, cn in ipairs(MOVERS) do
+            if d.ClassName == cn then
+                out[#out + 1] = cn .. ":" .. d.Name
+                break
+            end
+        end
+        if #out >= 10 then break end
+    end
+    return out
+end
+
+local function diagEnd(d)
+    if not d then return end
+    if diag == d then diag = nil end
+    if d.conn then d.conn:Disconnect(); d.conn = nil end
+    if d.done then return end
+    d.done = true
+    say(string.format("fisika | kecepatan root maks %.0f stud/dtk | mover/constraint di karakter: %s",
+        d.maxV, (d.movers and #d.movers > 0) and table.concat(d.movers, ", ") or "tidak ada"))
+end
+
+local function diagStart()
+    if not CFG.Diag then return end
+    diagEnd(diag)
+    local d = { maxV = 0, movers = nil, done = false }
+    diag = d
+    d.conn = RunService.Heartbeat:Connect(function()
+        local c = LP.Character
+        local rt = c and c:FindFirstChild("HumanoidRootPart")
+        if rt then
+            local v = rt.AssemblyLinearVelocity.Magnitude
+            if v > d.maxV then d.maxV = v end
+        end
+    end)
+    task.delay(0.6, function()
+        if not d.done then d.movers = listMovers(LP.Character) end
+    end)
+end
+
+-- ---------- bot tap ----------
+local function stopRun(why)
+    if not run then return end
+    local r = run
+    run = nil
+    if r.conn then r.conn:Disconnect() end
+    local s = r.sess
+    say(string.format("selesai (%s) | tap terkirim %d%s", why or "?", r.sent,
+        s and (" | taps server: kita " .. tostring(s.myTaps) .. " / lawan " .. tostring(s.enTaps)) or ""))
+end
+
+local function sendTap(r, clk)
+    local s = r.sess
+    if s and not s.ended then
+        r.idx = math.max(r.idx, tonumber(s.tapIndex) or 0) + 1
+        s.tapIndex = r.idx
+        s.predict = (tonumber(s.predict) or 0) + TAP_STEP * 0.6
+        s.myTapsLocal = (tonumber(s.myTapsLocal) or 0) + 1
+    else
+        r.idx = r.idx + 1
+    end
+    local idx = r.idx
+    pcall(function() ClashTap:FireServer(idx) end)
+    r.sent = r.sent + 1
+    r.stamps[#r.stamps + 1] = clk
+end
+
+-- laju target (tap/detik): naik kalau ketinggalan, turun kalau unggul, hanyut pelan
+local function currentRate(r, s, prof, clk)
+    local k = 0.5
+    if s and tonumber(s.power) then
+        local lead = s.power * (tonumber(s.side) or r.side)
+        k = math.clamp((0.35 - lead) / 0.7, 0, 1)
+    end
+    if clk >= r.driftT then
+        r.driftT = clk + 0.4 + math.random() * 0.4
+        r.drift = math.clamp(r.drift + randn() * 0.05, 0.88, 1.08)
+    end
+    return (prof.Base + (prof.Max - prof.Base) * k) * r.drift
+end
+
+-- jeda ke tap berikutnya: lognormal (rata-rata ~1/rate) + jeda kecil berkala
+local function nextGap(r, rate)
+    local gap = (1 / math.max(rate, 1)) * math.exp(randn() * 0.26 - 0.034)
+    gap = math.max(gap, 0.055)
+    r.untilPause = r.untilPause - 1
+    if r.untilPause <= 0 then
+        r.untilPause = math.random(6, 14)
+        if math.random() < CFG.Hesitate then
+            gap = gap + 0.12 + math.random() * 0.12
+        end
+    end
+    return gap
+end
+
+-- batas keras: maksimal Cap tap dalam 1 detik terakhir
+local function capOk(r, clk, cap)
+    local st = r.stamps
+    while st[1] and clk - st[1] > 1 do table.remove(st, 1) end
+    return #st < cap
+end
+
+local function startRun(myChar, enemyChar, side, startsAt, endsAt, resumed)
+    if not (alive and CFG.Enabled) then return end
+    if typeof(myChar) ~= "Instance" or myChar ~= LP.Character then return end
+    if typeof(startsAt) ~= "number" or typeof(endsAt) ~= "number" then return end
+    stopRun("sesi baru")
+
+    local r = {
+        sent = 0, idx = 0, stamps = {}, nextT = 0, untilPause = math.random(6, 14),
+        drift = 1, driftT = 0, scanTries = 0, scanT = 0, sess = nil,
+        startsAt = startsAt, endsAt = endsAt, side = tonumber(side) or 1,
+        react = resumed and 0.05 or (CFG.ReactMin + math.random() * (CFG.ReactMax - CFG.ReactMin)),
+    }
+    run = r
+    say(string.format("clash mulai | side %s | durasi %.1fs | mulai ngetap %.1fs lagi | mode %s",
+        tostring(side), endsAt - startsAt,
+        math.max(startsAt - workspace:GetServerTimeNow(), 0) + r.react, CFG.Mode))
+
+    r.conn = RunService.Heartbeat:Connect(function()
+        if run ~= r then return end
+        local now = workspace:GetServerTimeNow()
+        if now >= r.endsAt then stopRun("waktu habis"); return end
+        if not CFG.Enabled then stopRun("dimatikan"); return end
+        local char = LP.Character
+        if not char or char ~= myChar or not char.Parent then stopRun("karakter hilang"); return end
+
+        if not r.sess and r.scanTries < 6 and os.clock() >= r.scanT then
+            r.scanTries = r.scanTries + 1
+            r.scanT = os.clock() + 0.15
+            r.sess = findSession()
+        end
+        local s = r.sess
+        if s and s.ended then stopRun("sesi game selesai"); return end
+        if now < r.startsAt + r.react then return end
+
+        local clk = os.clock()
+        if clk < r.nextT then return end
+        local prof = PROFILES[CFG.Mode] or PROFILES.safe
+        if not capOk(r, clk, prof.Cap) then r.nextT = clk + 0.03; return end
+        sendTap(r, clk)
+        r.nextT = clk + nextGap(r, currentRate(r, s, prof, clk))
+    end)
+end
+
+conns[#conns + 1] = ClashBattle.OnClientEvent:Connect(function(kind, ...)
+    if kind == "Start" then
+        local myChar, _, _, _, endsAt = ...
+        if typeof(myChar) == "Instance" and myChar == LP.Character then
+            local remain = 8
+            if typeof(endsAt) == "number" then
+                remain = math.max(endsAt - workspace:GetServerTimeNow(), 0)
+            end
+            holdFor(remain + 1.0)
+            diagStart()
+        end
+        startRun(...)
+    elseif kind == "End" then
+        holdFor(0.8)  -- kasih waktu karakter settle sebelum lock/parry nyala lagi
+        stopRun("end dari server")
+        local d = diag
+        if d then task.delay(0.7, function() diagEnd(d) end) end
+    end
+end)
+
+local API = {}
+API.cfg = CFG
+function API.get() return CFG.Enabled end
+function API.set(on)
+    CFG.Enabled = (on == true)
+    if not CFG.Enabled then
+        stopRun("dimatikan")
+    elseif not run then
+        -- dinyalain pas clash lagi jalan: ambil alih sesi yang ada
+        task.spawn(function()
+            local s = findSession()
+            if s and not run and typeof(s.endsAt) == "number" and workspace:GetServerTimeNow() < s.endsAt then
+                startRun(s.myChar, s.enemyChar, s.side, s.startsAt, s.endsAt, true)
+            end
+        end)
+    end
+end
+function API.getMode() return CFG.Mode end
+function API.setMode(m)
+    if PROFILES[m] then
+        CFG.Mode = m
+        say("mode " .. m)
+    end
+end
+function API.status()
+    if run then
+        return string.format("clash jalan | %d tap | %s", run.sent, CFG.Mode == "safe" and "aman" or "agresif")
+    end
+    return CFG.Enabled and "siap" or "mati"
+end
+env.CLASH_API = API
+
+env.__CLASHBOT_STOP = function()
+    alive = false
+    stopRun("unload")
+    diagEnd(diag)
+    env.CLASH_UNTIL = nil
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    if env.CLASH_API == API then env.CLASH_API = nil end
+end
+
+local P0 = PROFILES[CFG.Mode]
+say(string.format("siap | mode %s | base %.1f / max %.1f tap/detik | cap %d/dtk", CFG.Mode, P0.Base, P0.Max, P0.Cap))
+]=====]
 
 -- =====================================================================
 --  DASAR
 -- =====================================================================
-local VERSION = "1.5"  -- + fix attach Combat tools (pollWar longgar + timeout)
+local VERSION = "1.7"  -- v1.7: auto clash v2 (tap manusiawi, mode aman/agresif), lock+parry pause pas clash; v1.6: + parry: timing basi setelah patch game (PlaceVersion), belajar dari hit yang ke-block, cek GuardLocked; + auto clash
 
 local Players      = game:GetService("Players")
 local RunService   = game:GetService("RunService")
@@ -3364,7 +3752,7 @@ local CFGFILE = "SIFB_config.json"
 local S = {
     op = 74, sc = 100, accent = 1, motion = true, mute = true, leafGuard = true, autosave = true, fast = false,
     mini = false, fx = true, intro = true,
-    hk = { hub = "RightAlt", gym = "F1", parry = "F2", lock = "F3", lag = "F4" },
+    hk = { hub = "RightAlt", gym = "F1", parry = "F2", lock = "F3", lag = "F4", clash = "F5" },
     wp = nil, fp = nil, mp = nil,
     bst = { cap = 2, unlock = false, quality = false, light = false, mute = false, far = false, sweep = false, protect = true, lod = 400, dist = 120 },
     ab = { mode = 0, target = 60 },
@@ -4244,8 +4632,28 @@ function K.cnum(which, field)
         end
 end
 
-function K.allOn() K.setGym(true); K.setWar("parry", true); K.setWar("lock", true); K.lagApply(); log("Semua sistem dinyalakan", "ok") end
-function K.allOff() K.setGym(false); K.setWar("parry", false); K.setWar("lock", false); K.lagRestore(); log("Semua sistem dimatikan") end
+function K.clashGet()
+    local a = env.CLASH_API
+    return a ~= nil and a.get() == true
+end
+function K.setClash(on)
+    local a = env.CLASH_API
+    if not a then log("Auto clash belum siap (remote clash belum ketemu)", "warn"); return end
+    a.set(on == true)
+    log("Auto clash " .. (on and "nyala" or "mati"), on and "ok" or nil)
+end
+function K.clashModeGet()
+    local a = env.CLASH_API
+    return (a and a.getMode and a.getMode() == "push") and 2 or 1
+end
+function K.setClashMode(i)
+    local a = env.CLASH_API
+    if not (a and a.setMode) then log("Auto clash belum siap (remote clash belum ketemu)", "warn"); return end
+    a.setMode(i == 2 and "push" or "safe")
+    log("Mode clash: " .. (i == 2 and "agresif" or "aman"), "ok")
+end
+function K.allOn() K.setGym(true); K.setWar("parry", true); K.setWar("lock", true); K.setClash(true); K.lagApply(); log("Semua sistem dinyalakan", "ok") end
+function K.allOff() K.setGym(false); K.setWar("parry", false); K.setWar("lock", false); K.setClash(false); K.lagRestore(); log("Semua sistem dimatikan") end
 
 -- ---------- statistik timing Wraith ----------
 function K.calcStats()
@@ -5995,6 +6403,7 @@ do
     local c1 = W.card(p)
     W.toggle(c1, "Auto parry", nil, function() return K.warGet("parry") end, function() K.setWar("parry", not K.warGet("parry")) end)
     W.toggle(c1, "Combat lock", nil, function() return K.warGet("lock") end, function() K.setWar("lock", not K.warGet("lock")) end)
+    W.toggle(c1, "Auto clash", "Ngetap otomatis pas clash battle", function() return K.clashGet() end, function() K.setClash(not K.clashGet()) end)
     local setChip = W.chipRow(c1, "Status", nil)
     reg(function()
         if MOD.war.state ~= "ready" then setChip(MOD.war.state == "loading" and "Memuat" or "Tidak tersedia", TH.mute); return end
@@ -6017,6 +6426,9 @@ do
 
     W.heading(p, "Profil")
     W.seg(p, { WAR_PRESETS[1][1], WAR_PRESETS[2][1], WAR_PRESETS[3][1] }, K.matchPreset, K.applyPreset)
+
+    W.heading(p, "Mode auto clash")
+    W.seg(p, { "Aman", "Agresif" }, K.clashModeGet, K.setClashMode)
 
     W.heading(p, "Energi guard")
     local ce = W.card(p)
@@ -6357,7 +6769,7 @@ do
 
     local c2 = W.section(p, "Hotkey", false)
     do
-        local items = { { "hub", "Buka atau tutup hub" }, { "gym", "Gym bot" }, { "parry", "Auto parry" }, { "lock", "Combat lock" }, { "lag", "Anti-lag" } }
+        local items = { { "hub", "Buka atau tutup hub" }, { "gym", "Gym bot" }, { "parry", "Auto parry" }, { "lock", "Combat lock" }, { "lag", "Anti-lag" }, { "clash", "Auto clash" } }
         local chips = {}
         for _, it in ipairs(items) do
             local row = W.row(c2, it[2], nil, false, 110)
@@ -6583,6 +6995,7 @@ track(UIS.InputBegan:Connect(function(i, gp)
     elseif n == S.hk.gym then K.setGym(not K.gymGet())
     elseif n == S.hk.parry then K.setWar("parry", not K.warGet("parry"))
     elseif n == S.hk.lock then K.setWar("lock", not K.warGet("lock"))
+    elseif n == (S.hk.clash or "F5") then K.setClash(not K.clashGet())
     elseif n == S.hk.lag then
         if V.lag.applied then K.lagRestore() else K.lagApply() end
     end
@@ -6686,5 +7099,20 @@ task.spawn(function()
         if tick % 8 == 0 and DIRTY and S.autosave then K.saveNow() end
     end
 end)
+
+do
+    local ld = loadstring or load
+    if ld then
+        local fn, err = ld(SRC.clash, "=SIFB_clash")
+        if fn then
+            task.spawn(function()
+                local ok2, e2 = pcall(fn)
+                if not ok2 then log("Auto clash gagal dimuat: " .. tostring(e2), "warn") end
+            end)
+        else
+            log("Auto clash gagal dikompilasi: " .. tostring(err), "warn")
+        end
+    end
+end
 
 print("[SIFB v" .. VERSION .. "] Skill issue final boss | By Duke | " .. S.hk.hub .. " = buka/tutup")
